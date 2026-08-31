@@ -28,7 +28,8 @@ POST /api/ai/chat (JWT) → AiContext → chatService.handleChatMessage()
 - **`core/providerToolAdapter.js`** — convierte el `inputSchema` de una tool a JSON Schema, reutilizable por cualquier proveedor basado en function calling.
 - **`providers/openaiProvider.js`** — `AIProvider` real sobre la API de OpenAI (fetch nativo, sin SDK).
 - **`providers/anthropicProvider.js`** — `AIProvider` real sobre la API de Mensajes de Anthropic/Claude (fetch nativo, sin SDK) — misma interfaz, wire distinto (system fuera del array de mensajes, `tool_use`/`tool_result` en vez de `tool_calls`/role `tool`).
-- `providers/index.js` elige el proveedor según `AI_PROVIDER` (`openai` por defecto, o `anthropic`/`claude`) + `AI_API_KEY`/`AI_MODEL` (`gpt-4o-mini` o `claude-haiku-4-5-20251001` por defecto según el proveedor).
+- **`providers/googleProvider.js`** — `AIProvider` real sobre la API de Google AI Studio/Gemini (fetch nativo, sin SDK). El modelo por defecto (`gemini-3.6-flash`) razona ("thinking") antes de responder, por eso usa más presupuesto de tokens/timeout que los otros dos. Cuando reproduce una `functionCall` en el siguiente turno necesita la `thought_signature` exacta que devolvió el modelo — se cachea en la instancia mientras dura el loop de una request; si no está disponible (p. ej. al redactar el resumen tras confirmar una acción, con una instancia nueva) cae a describir la llamada+resultado en texto plano en vez de fallar.
+- `providers/index.js` elige el proveedor según `AI_PROVIDER` (`openai` por defecto, o `anthropic`/`claude`, o `google`/`gemini`) + `AI_API_KEY`/`AI_MODEL` (`gpt-4o-mini`, `claude-haiku-4-5-20251001` o `gemini-3.6-flash` por defecto según el proveedor).
 - **`providers/fakeProviderForTests.js`** — proveedor determinista SOLO para pruebas (`AI_FAKE_PROVIDER=1`), nunca en producción.
 - **`tools/*`** — 24 herramientas (14 de escritura/acción + 10 de lectura), cada una delegando en `server/src/services/*`.
 - **`security/permissions.js`** — permisos por rol calculados del tool registry: `tenant_admin` → todo; `tenant_staff` → read+write, nunca `destructive`.
@@ -46,7 +47,7 @@ Todas requieren `requireAuth` + `requireTenant` (igual que el resto de la API) y
 
 ## Variables de entorno
 
-`AI_API_KEY` (obligatoria para que el chat responda de verdad — sin ella el provider es `NullAIProvider` y el chat falla con un mensaje genérico), `AI_PROVIDER` (opcional, `openai` por defecto, o `anthropic`/`claude`) y `AI_MODEL` (opcional, default `gpt-4o-mini` o `claude-haiku-4-5-20251001` según el proveedor). Ninguna tiene valor real en `server/.env.example`; solo viven en `server/.env`, nunca en el frontend ni en el código.
+`AI_API_KEY` (obligatoria para que el chat responda de verdad — sin ella el provider es `NullAIProvider` y el chat falla con un mensaje genérico), `AI_PROVIDER` (opcional, `openai` por defecto, o `anthropic`/`claude`, o `google`/`gemini`) y `AI_MODEL` (opcional, default `gpt-4o-mini`, `claude-haiku-4-5-20251001` o `gemini-3.6-flash` según el proveedor). Ninguna tiene valor real en `server/.env.example`; solo viven en `server/.env`, nunca en el frontend ni en el código.
 
 ## Qué falta
 

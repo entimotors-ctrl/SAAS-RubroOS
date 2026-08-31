@@ -1,6 +1,7 @@
 const { NullAIProvider } = require('../core/provider');
 const { OpenAIProvider } = require('./openaiProvider');
 const { AnthropicProvider } = require('./anthropicProvider');
+const { GoogleAIProvider } = require('./googleProvider');
 
 /**
  * Elige el proveedor de IA a partir de las variables de entorno. Se llama
@@ -21,6 +22,9 @@ function createProvider() {
   const kind = (process.env.AI_PROVIDER || 'openai').trim().toLowerCase();
   if (kind === 'anthropic' || kind === 'claude') {
     return new AnthropicProvider({ apiKey, model: process.env.AI_MODEL || undefined });
+  }
+  if (kind === 'google' || kind === 'gemini') {
+    return new GoogleAIProvider({ apiKey, model: process.env.AI_MODEL || undefined });
   }
   return new OpenAIProvider({ apiKey, model: process.env.AI_MODEL || undefined });
 }
