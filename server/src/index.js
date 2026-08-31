@@ -15,6 +15,7 @@ const agroRoutes = require('./routes/agro');
 const ganaderiaRoutes = require('./routes/ganaderia');
 const carwashRoutes = require('./routes/carwash');
 const aiRoutes = require('./routes/ai');
+const whatsappIdentityRoutes = require('./routes/whatsappIdentity');
 
 require('./seed').ensureSeed();
 
@@ -49,8 +50,12 @@ app.use('/api/carwash', requireAuth, requireTenant, requireBusinessType('carwash
 // el propio AiContext ya trae el businessType del JWT y filtra las tools.
 app.use('/api/ai', requireAuth, requireTenant, aiRoutes);
 
-// Webhook de WhatsApp: sin requireAuth (Meta no manda nuestro JWT), inerte
-// hasta que exista vinculación número→usuario. Ver server/src/routes/whatsapp.js.
+// Configuración de la vinculación (requiere sesión normal de RubroOS,
+// distinto del webhook de abajo que Meta llama sin JWT).
+app.use('/api/whatsapp-identity', requireAuth, requireTenant, whatsappIdentityRoutes);
+
+// Webhook de WhatsApp: sin requireAuth (Meta no manda nuestro JWT). Solo
+// actúa sobre números ya vinculados (ver server/src/whatsapp/identityResolver.js).
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 
 app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
