@@ -1,21 +1,28 @@
 const express = require('express');
 const db = require('../db');
 const { simpleCrud } = require('../utils/crud');
+const barberiaService = require('../services/barberiaService');
 
 const router = express.Router();
 
-router.use('/barberos', simpleCrud('barberia_barberos', ['nombre', 'especialidad', 'activo']));
-router.use('/servicios', simpleCrud('barberia_servicios', ['nombre', 'precio', 'duracion_min']));
-router.use('/clientes', simpleCrud('barberia_clientes', ['nombre', 'telefono']));
-router.use('/citas', simpleCrud('barberia_citas', ['cliente_id', 'barbero_id', 'servicio_id', 'fecha', 'hora', 'estado']));
+router.use('/barberos', simpleCrud('barberia_barberos', ['nombre', 'especialidad', 'activo'], { required: ['nombre'] }));
+router.use('/servicios', simpleCrud('barberia_servicios', ['nombre', 'precio', 'duracion_min'], { required: ['nombre'] }));
+router.use('/clientes', simpleCrud('barberia_clientes', ['nombre', 'telefono'], { required: ['nombre'] }));
+router.use(
+  '/citas',
+  simpleCrud('barberia_citas', ['cliente_id', 'barbero_id', 'servicio_id', 'fecha', 'hora', 'estado'], {
+    required: ['fecha', 'hora'],
+    refs: { cliente_id: 'barberia_clientes', barbero_id: 'barberia_barberos', servicio_id: 'barberia_servicios' },
+  })
+);
 
 // ---- Cuentas (POS por silla) ----
 router.get('/cuentas', (req, res) => {
   const cuentas = db
     .prepare(
       `SELECT cu.*, cl.nombre AS cliente_nombre, b.nombre AS barbero_nombre FROM barberia_cuentas cu
-       LEFT JOIN barberia_clientes cl ON cl.id = cu.cliente_id
-       LEFT JOIN barberia_barberos b ON b.id = cu.barbero_id
+       LEFT JOIN barberia_clientes cl ON cl.id = cu.cliente_id AND cl.tenant_id = cu.tenant_id
+       LEFT JOIN barberia_barberos b ON b.id = cu.barbero_id AND b.tenant_id = cu.tenant_id
        WHERE cu.tenant_id = ? ORDER BY cu.id DESC`
     )
     .all(req.user.tenant_id);
@@ -24,33 +31,22 @@ router.get('/cuentas', (req, res) => {
   res.json(cuentas);
 });
 
-router.post('/cuentas', (req, res) => {
-  const { cliente_id, barbero_id, items } = req.body || {};
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'La cuenta necesita al menos un ítem' });
+router.post('/cuentas', (req, res, next) => {
+  try {
+    const cuenta = barberiaService.crearCuenta(req.user.tenant_id, req.body || {});
+    res.status(201).json(cuenta);
+  } catch (err) {
+    next(err);
   }
-  const total = items.reduce((sum, it) => sum + Number(it.cantidad || 1) * Number(it.precio_unitario || 0), 0);
-  const info = db
-    .prepare('INSERT INTO barberia_cuentas (tenant_id, cliente_id, barbero_id, estado, total) VALUES (?, ?, ?, ?, ?)')
-    .run(req.user.tenant_id, cliente_id || null, barbero_id || null, 'abierta', total);
-  const insertItem = db.prepare(
-    'INSERT INTO barberia_cuenta_items (cuenta_id, tipo, descripcion, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?)'
-  );
-  for (const it of items) {
-    const subtotal = Number(it.cantidad || 1) * Number(it.precio_unitario || 0);
-    insertItem.run(info.lastInsertRowid, it.tipo || 'servicio', it.descripcion, it.cantidad || 1, it.precio_unitario || 0, subtotal);
-  }
-  const cuenta = db.prepare('SELECT * FROM barberia_cuentas WHERE id = ?').get(info.lastInsertRowid);
-  cuenta.items = db.prepare('SELECT * FROM barberia_cuenta_items WHERE cuenta_id = ?').all(cuenta.id);
-  res.status(201).json(cuenta);
 });
 
-router.post('/cuentas/:id/cobrar', (req, res) => {
-  const cuenta = db.prepare('SELECT * FROM barberia_cuentas WHERE id = ? AND tenant_id = ?').get(req.params.id, req.user.tenant_id);
-  if (!cuenta) return res.status(404).json({ error: 'Cuenta no encontrada' });
-  const metodo = req.body?.metodo_pago || 'efectivo';
-  db.prepare("UPDATE barberia_cuentas SET estado = 'pagada', metodo_pago = ? WHERE id = ?").run(metodo, cuenta.id);
-  res.json(db.prepare('SELECT * FROM barberia_cuentas WHERE id = ?').get(cuenta.id));
+router.post('/cuentas/:id/cobrar', (req, res, next) => {
+  try {
+    const cuenta = barberiaService.cobrarCuenta(req.user.tenant_id, req.params.id, req.body?.metodo_pago);
+    res.json(cuenta);
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.get('/resumen', (req, res) => {

@@ -1,20 +1,33 @@
 const express = require('express');
 const db = require('../db');
 const { simpleCrud } = require('../utils/crud');
+const tallerService = require('../services/tallerService');
 
 const router = express.Router();
 
-router.use('/clientes', simpleCrud('taller_clientes', ['nombre', 'telefono', 'direccion']));
-router.use('/vehiculos', simpleCrud('taller_vehiculos', ['cliente_id', 'placa', 'marca', 'modelo', 'anio', 'notas']));
-router.use('/citas', simpleCrud('taller_citas', ['cliente_id', 'vehiculo_id', 'fecha', 'hora', 'servicio', 'estado', 'notas']));
-router.use('/inventario', simpleCrud('taller_inventario', ['nombre', 'sku', 'precio', 'stock']));
+router.use('/clientes', simpleCrud('taller_clientes', ['nombre', 'telefono', 'direccion'], { required: ['nombre'] }));
+router.use(
+  '/vehiculos',
+  simpleCrud('taller_vehiculos', ['cliente_id', 'placa', 'marca', 'modelo', 'anio', 'notas'], {
+    required: ['placa'],
+    refs: { cliente_id: 'taller_clientes' },
+  })
+);
+router.use(
+  '/citas',
+  simpleCrud('taller_citas', ['cliente_id', 'vehiculo_id', 'fecha', 'hora', 'servicio', 'estado', 'notas'], {
+    required: ['fecha', 'hora'],
+    refs: { cliente_id: 'taller_clientes', vehiculo_id: 'taller_vehiculos' },
+  })
+);
+router.use('/inventario', simpleCrud('taller_inventario', ['nombre', 'sku', 'precio', 'stock'], { required: ['nombre'] }));
 
 // ---- POS / Ventas (contado y crédito) ----
 router.get('/ventas', (req, res) => {
   const ventas = db
     .prepare(
       `SELECT v.*, c.nombre AS cliente_nombre FROM taller_ventas v
-       LEFT JOIN taller_clientes c ON c.id = v.cliente_id
+       LEFT JOIN taller_clientes c ON c.id = v.cliente_id AND c.tenant_id = v.tenant_id
        WHERE v.tenant_id = ? ORDER BY v.id DESC`
     )
     .all(req.user.tenant_id);
@@ -27,48 +40,22 @@ router.get('/ventas', (req, res) => {
   res.json(ventas);
 });
 
-router.post('/ventas', (req, res) => {
-  const { cliente_id, tipo, items, pagado_inicial } = req.body || {};
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'La venta necesita al menos un ítem' });
+router.post('/ventas', (req, res, next) => {
+  try {
+    const venta = tallerService.registrarVenta(req.user.tenant_id, req.body || {});
+    res.status(201).json(venta);
+  } catch (err) {
+    next(err);
   }
-  const total = items.reduce((sum, it) => sum + Number(it.cantidad || 1) * Number(it.precio_unitario || 0), 0);
-  const esContado = tipo !== 'credito';
-  const pagado = esContado ? total : Number(pagado_inicial || 0);
-  const saldo = Math.max(total - pagado, 0);
-  const estado = saldo <= 0 ? 'pagada' : 'credito_abierto';
-
-  const info = db
-    .prepare('INSERT INTO taller_ventas (tenant_id, cliente_id, tipo, total, pagado, saldo, estado) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(req.user.tenant_id, cliente_id || null, esContado ? 'contado' : 'credito', total, pagado, saldo, estado);
-
-  const insertItem = db.prepare(
-    'INSERT INTO taller_venta_items (venta_id, descripcion, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)'
-  );
-  for (const it of items) {
-    const subtotal = Number(it.cantidad || 1) * Number(it.precio_unitario || 0);
-    insertItem.run(info.lastInsertRowid, it.descripcion, it.cantidad || 1, it.precio_unitario || 0, subtotal);
-  }
-
-  const venta = db.prepare('SELECT * FROM taller_ventas WHERE id = ?').get(info.lastInsertRowid);
-  venta.items = db.prepare('SELECT * FROM taller_venta_items WHERE venta_id = ?').all(venta.id);
-  res.status(201).json(venta);
 });
 
-router.post('/ventas/:id/abonos', (req, res) => {
-  const venta = db.prepare('SELECT * FROM taller_ventas WHERE id = ? AND tenant_id = ?').get(req.params.id, req.user.tenant_id);
-  if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
-  const monto = Number(req.body?.monto || 0);
-  if (monto <= 0) return res.status(400).json({ error: 'Monto inválido' });
-
-  db.prepare('INSERT INTO taller_abonos (tenant_id, venta_id, monto) VALUES (?, ?, ?)').run(req.user.tenant_id, venta.id, monto);
-  const pagado = venta.pagado + monto;
-  const saldo = Math.max(venta.total - pagado, 0);
-  const estado = saldo <= 0 ? 'pagada' : 'credito_abierto';
-  db.prepare('UPDATE taller_ventas SET pagado = ?, saldo = ?, estado = ? WHERE id = ?').run(pagado, saldo, estado, venta.id);
-
-  const actualizada = db.prepare('SELECT * FROM taller_ventas WHERE id = ?').get(venta.id);
-  res.json(actualizada);
+router.post('/ventas/:id/abonos', (req, res, next) => {
+  try {
+    const venta = tallerService.registrarAbono(req.user.tenant_id, req.params.id, req.body?.monto);
+    res.json(venta);
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.get('/finanzas/resumen', (req, res) => {
