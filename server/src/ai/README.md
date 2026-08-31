@@ -26,7 +26,9 @@ POST /api/ai/chat (JWT) → AiContext → chatService.handleChatMessage()
 - **`core/history.js`** — CRUD de `ai_conversations` / `ai_messages` / `ai_actions`, siempre filtrado por `tenant_id`. `sanitizeForAudit()` oculta credenciales antes de guardar.
 - **`core/provider.js`** — interfaz `AIProvider` (`chat({ systemPrompt, messages, tools }) → tool_call | message`). `NullAIProvider` es el default seguro cuando no hay `AI_API_KEY`.
 - **`core/providerToolAdapter.js`** — convierte el `inputSchema` de una tool a JSON Schema, reutilizable por cualquier proveedor basado en function calling.
-- **`providers/openaiProvider.js`** — el primer `AIProvider` real, sobre la API de OpenAI (fetch nativo, sin SDK). `providers/index.js` elige el proveedor según `AI_API_KEY`/`AI_MODEL` (`gpt-4o-mini` por defecto).
+- **`providers/openaiProvider.js`** — `AIProvider` real sobre la API de OpenAI (fetch nativo, sin SDK).
+- **`providers/anthropicProvider.js`** — `AIProvider` real sobre la API de Mensajes de Anthropic/Claude (fetch nativo, sin SDK) — misma interfaz, wire distinto (system fuera del array de mensajes, `tool_use`/`tool_result` en vez de `tool_calls`/role `tool`).
+- `providers/index.js` elige el proveedor según `AI_PROVIDER` (`openai` por defecto, o `anthropic`/`claude`) + `AI_API_KEY`/`AI_MODEL` (`gpt-4o-mini` o `claude-haiku-4-5-20251001` por defecto según el proveedor).
 - **`providers/fakeProviderForTests.js`** — proveedor determinista SOLO para pruebas (`AI_FAKE_PROVIDER=1`), nunca en producción.
 - **`tools/*`** — 24 herramientas (14 de escritura/acción + 10 de lectura), cada una delegando en `server/src/services/*`.
 - **`security/permissions.js`** — permisos por rol calculados del tool registry: `tenant_admin` → todo; `tenant_staff` → read+write, nunca `destructive`.
@@ -44,7 +46,7 @@ Todas requieren `requireAuth` + `requireTenant` (igual que el resto de la API) y
 
 ## Variables de entorno
 
-`AI_API_KEY` (obligatoria para que el chat responda de verdad — sin ella el provider es `NullAIProvider` y el chat falla con un mensaje genérico) y `AI_MODEL` (opcional, default `gpt-4o-mini`). Ninguna de las dos tiene valor real en `server/.env.example`; solo viven en `server/.env`, nunca en el frontend ni en el código.
+`AI_API_KEY` (obligatoria para que el chat responda de verdad — sin ella el provider es `NullAIProvider` y el chat falla con un mensaje genérico), `AI_PROVIDER` (opcional, `openai` por defecto, o `anthropic`/`claude`) y `AI_MODEL` (opcional, default `gpt-4o-mini` o `claude-haiku-4-5-20251001` según el proveedor). Ninguna tiene valor real en `server/.env.example`; solo viven en `server/.env`, nunca en el frontend ni en el código.
 
 ## Qué falta
 
