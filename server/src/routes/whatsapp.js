@@ -4,6 +4,7 @@ const { verifySignature } = require('../whatsapp/signature');
 const { parseIncomingEvents, sendMessage, toWhatsAppText, splitMessage, getOutbox, clearOutbox } = require('../whatsapp/adapter');
 const identityResolver = require('../whatsapp/identityResolver');
 const { isRateLimited } = require('../whatsapp/rateLimiter');
+const confirmationIntent = require('../whatsapp/confirmationIntent');
 const { buildContext } = require('../ai/core/context');
 const chatService = require('../ai/core/chatService');
 const history = require('../ai/core/history');
@@ -94,12 +95,15 @@ async function processTextMessage(evt, identity) {
     conversation = history.createConversation({ tenantId: context.tenantId, userId: context.userId, channel: 'whatsapp', externalUserId: evt.from });
   }
 
-  const result = await chatService.handleChatMessage({
-    context,
-    conversationId: conversation.id,
-    userMessage: evt.text,
-    idempotencyKey: evt.messageId,
-  });
+  const handled = await confirmationIntent.tryHandle({ context, conversation, text: evt.text });
+  const result =
+    handled ||
+    (await chatService.handleChatMessage({
+      context,
+      conversationId: conversation.id,
+      userMessage: evt.text,
+      idempotencyKey: evt.messageId,
+    }));
 
   await replyText(evt.from, result.message);
 }
