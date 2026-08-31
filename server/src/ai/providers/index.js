@@ -2,6 +2,7 @@ const { NullAIProvider } = require('../core/provider');
 const { OpenAIProvider } = require('./openaiProvider');
 const { AnthropicProvider } = require('./anthropicProvider');
 const { GoogleAIProvider } = require('./googleProvider');
+const { GroqProvider } = require('./groqProvider');
 
 /**
  * Elige el proveedor de IA a partir de las variables de entorno. Se llama
@@ -25,6 +26,9 @@ function createProvider() {
   }
   if (kind === 'google' || kind === 'gemini') {
     return new GoogleAIProvider({ apiKey, model: process.env.AI_MODEL || undefined });
+  }
+  if (kind === 'groq') {
+    return new GroqProvider({ apiKey, model: process.env.AI_MODEL || undefined });
   }
   return new OpenAIProvider({ apiKey, model: process.env.AI_MODEL || undefined });
 }

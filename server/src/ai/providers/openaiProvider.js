@@ -14,10 +14,14 @@ const MAX_RETRIES = 1;
  * mismo chat({systemPrompt, messages, tools}), nada más.
  */
 class OpenAIProvider {
-  constructor({ apiKey, model } = {}) {
+  constructor({ apiKey, model, baseUrl } = {}) {
     if (!apiKey) throw new Error('OpenAIProvider requiere un apiKey (AI_API_KEY)');
     this.apiKey = apiKey;
     this.model = model || DEFAULT_MODEL;
+    // Configurable para que otros backends compatibles con el formato de
+    // OpenAI (Groq, etc.) puedan reutilizar esta misma clase sin duplicar
+    // la lógica de conversión de mensajes/tools — ver providers/groqProvider.js.
+    this.baseUrl = baseUrl || OPENAI_URL;
   }
 
   toOpenAIMessages(systemPrompt, messages) {
@@ -52,7 +56,7 @@ class OpenAIProvider {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
-        const res = await fetch(OPENAI_URL, {
+        const res = await fetch(this.baseUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
           body: JSON.stringify(body),
