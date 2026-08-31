@@ -175,27 +175,34 @@ CREATE TABLE IF NOT EXISTS carwash_turnos (
 );
 
 -- ===== IA (preparación — sin orquestador conectado todavía, ver server/src/ai) =====
+-- tenant_id se guarda también en ai_messages/ai_actions (no solo en
+-- ai_conversations) a propósito: así cualquier consulta puede filtrar por
+-- tenant_id directamente, sin depender de un JOIN correcto contra
+-- ai_conversations para no repetir la clase de error que corrigió la
+-- auditoría de seguridad multi-tenant (JOIN sin tenant_id en ambos lados).
 CREATE TABLE IF NOT EXISTS ai_conversations (
   id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, user_id INTEGER,
   channel TEXT NOT NULL DEFAULT 'web', external_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS ai_messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL,
   role TEXT NOT NULL, content TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id)
 );
 CREATE TABLE IF NOT EXISTS ai_actions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL,
-  tool_name TEXT NOT NULL, arguments TEXT,
+  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL,
+  tool_name TEXT NOT NULL, arguments TEXT, idempotency_key TEXT,
   status TEXT NOT NULL DEFAULT 'pending_confirmation', result TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id)
 );
 CREATE INDEX IF NOT EXISTS idx_ai_conversations_tenant ON ai_conversations(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_ai_actions_conversation ON ai_actions(conversation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_actions_idempotency
+  ON ai_actions(conversation_id, tool_name, idempotency_key) WHERE idempotency_key IS NOT NULL;
 `);
 
 module.exports = db;
