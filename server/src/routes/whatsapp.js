@@ -1,17 +1,18 @@
 const express = require('express');
+const { verifySignature } = require('../whatsapp/signature');
 
 const router = express.Router();
 
 /**
- * Webhook de WhatsApp Cloud API — todavía NO conectado a un número real ni
- * a la IA. Deja solo el endpoint y el flujo conceptual documentados para
- * cuando se implemente:
+ * Webhook de WhatsApp Cloud API.
  *
- *   WhatsApp phone → user → tenant → role → permissions → AI → tool → business service
+ *   WhatsApp → Meta → este webhook → WhatsApp Adapter → Identity Resolver
+ *     → AiContext → AI Orchestrator (el mismo que usa el chat web) → tool
+ *     → service → SQLite → Adapter → WhatsApp
  *
- * Hasta que exista una vinculación segura número-de-teléfono → usuario/tenant,
- * ningún mensaje entrante ejecuta ninguna acción de negocio real (punto 15
- * de la auditoría: no permitir acciones desde WhatsApp sin autenticación).
+ * Hasta que exista una vinculación segura número-de-teléfono → usuario/tenant
+ * (server/src/whatsapp/identityResolver.js), ningún mensaje entrante ejecuta
+ * ninguna acción de negocio real.
  */
 
 // Meta llama a esto una sola vez, al configurar la URL del webhook, para
@@ -27,10 +28,18 @@ router.get('/webhook', (req, res) => {
   return res.sendStatus(403);
 });
 
-// Aquí llegarían los mensajes entrantes. Por ahora solo confirma recepción;
-// no resuelve identidad ni despacha a server/src/ai todavía.
 router.post('/webhook', (req, res) => {
-  console.log('[whatsapp] mensaje entrante recibido (webhook preparado, procesamiento no implementado todavía)');
+  const signatureHeader = req.headers['x-hub-signature-256'];
+  const valid = verifySignature(req.rawBody, signatureHeader, process.env.WHATSAPP_APP_SECRET);
+  if (!valid) {
+    console.warn('[whatsapp] POST /webhook rechazado: firma X-Hub-Signature-256 inválida o ausente');
+    return res.sendStatus(403);
+  }
+
+  // El procesamiento real (parseo de eventos, idempotencia, identidad,
+  // orquestador de IA, respuesta) se conecta en un commit siguiente — por
+  // ahora solo se confirma la firma y se acusa recibo, sin ejecutar tools.
+  console.log('[whatsapp] POST /webhook con firma válida (procesamiento del mensaje todavía no conectado)');
   res.sendStatus(200);
 });
 

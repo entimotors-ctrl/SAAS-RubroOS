@@ -27,7 +27,11 @@ app.use(helmet());
 const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',').map((o) => o.trim());
 app.use(cors({ origin: corsOrigins }));
 
-app.use(express.json());
+// Se guarda el body crudo (bytes exactos) además del JSON ya parseado: la
+// verificación de firma X-Hub-Signature-256 de Meta necesita los bytes tal
+// cual llegaron, no una re-serialización de req.body (que podría no dar
+// byte-a-byte el mismo resultado). No afecta a ninguna otra ruta.
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, name: 'RubroOS API' }));
 app.get('/api/business-types', (req, res) => res.json(BUSINESS_TYPES));
