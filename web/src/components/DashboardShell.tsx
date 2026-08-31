@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { Settings } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../lib/auth-context';
 import type { BusinessTypeConfig } from '../lib/business-types';
 import { LogoMark } from './Logo';
 import { ChatWidget } from './ChatWidget';
+import { WhatsAppSettings } from './WhatsAppSettings';
 
 export interface NavItem {
   id: string;
@@ -26,6 +29,8 @@ export function DashboardShell({
 }) {
   const { user, tenant, logout } = useAuth();
   const BusinessIcon = business.icon;
+  const [showWhatsAppSettings, setShowWhatsAppSettings] = useState(false);
+  const canConfigureWhatsApp = user?.role === 'tenant_admin';
 
   return (
     <div className="flex min-h-screen bg-slate-950">
@@ -61,9 +66,20 @@ export function DashboardShell({
         <div className="border-t border-white/10 pt-4">
           <p className="truncate text-sm font-semibold text-white">{tenant?.nombre_empresa}</p>
           <p className="truncate text-xs text-slate-500">{user?.email}</p>
-          <button onClick={logout} className="mt-3 text-xs font-medium text-slate-400 hover:text-red-400">
-            Cerrar sesión
-          </button>
+          <div className="mt-3 flex items-center gap-3">
+            <button onClick={logout} className="text-xs font-medium text-slate-400 hover:text-red-400">
+              Cerrar sesión
+            </button>
+            {canConfigureWhatsApp && (
+              <button
+                onClick={() => setShowWhatsAppSettings(true)}
+                title="Configuración"
+                className="ml-auto flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-white"
+              >
+                <Settings className="h-3.5 w-3.5" /> Configuración
+              </button>
+            )}
+          </div>
         </div>
       </aside>
 
@@ -73,9 +89,16 @@ export function DashboardShell({
             <LogoMark className="h-5 w-5" />
             <span className="text-sm font-bold text-white">RubroOS</span>
           </div>
-          <button onClick={logout} className="text-xs text-slate-400">
-            Salir
-          </button>
+          <div className="flex items-center gap-3">
+            {canConfigureWhatsApp && (
+              <button onClick={() => setShowWhatsAppSettings(true)} title="Configuración" className="text-slate-400">
+                <Settings className="h-4 w-4" />
+              </button>
+            )}
+            <button onClick={logout} className="text-xs text-slate-400">
+              Salir
+            </button>
+          </div>
         </header>
         <nav className="flex gap-1 overflow-x-auto border-b border-white/10 bg-slate-900/30 px-3 py-2 lg:hidden">
           {navItems.map((item) => {
@@ -98,6 +121,7 @@ export function DashboardShell({
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
       <ChatWidget business={business} />
+      {canConfigureWhatsApp && <WhatsAppSettings open={showWhatsAppSettings} onClose={() => setShowWhatsAppSettings(false)} />}
     </div>
   );
 }
