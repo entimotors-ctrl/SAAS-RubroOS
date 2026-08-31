@@ -1,17 +1,34 @@
 /**
- * Espejo del mismo modelo de permisos que ya usa la API REST
- * (requireTenant + requireBusinessType + role, ver server/src/middleware/auth.js).
- * Una herramienta de IA nunca debe tener más acceso que el usuario humano
- * equivalente — estas funciones son el punto donde eso se verifica antes
- * de siquiera intentar ejecutar una tool.
+ * Modelo de permisos de las tools de IA.
+ *
+ * Una única fuente de verdad: el permiso otorgado a un rol se calcula
+ * directamente del toolRegistry (cada tool ya declara su `permission` y su
+ * `riskLevel`), en vez de mantener un catálogo de permisos aparte que se
+ * podría desincronizar de las tools reales.
+ *
+ * Política:
+ *   tenant_admin — todos los permisos de las tools de su rubro (read, write, destructive).
+ *   tenant_staff — read y write, NUNCA destructive (cancelar, eliminar, modificar
+ *                  información crítica queda reservado al admin del negocio).
+ *   cualquier otro rol (p. ej. owner, que no tiene tenant/rubro propio) — ninguno;
+ *                  las tools de rubro no aplican a esa cuenta.
+ *
+ * La IA nunca decide esto: se calcula en el backend a partir del rol real
+ * del usuario autenticado, antes de que exista ninguna tool call.
  */
+const ROLE_ALLOWED_RISK_LEVELS = {
+  tenant_admin: ['read', 'write', 'destructive'],
+  tenant_staff: ['read', 'write'],
+};
 
-function canUseTools(context) {
-  return Boolean(context?.tenantId && context?.businessType);
+function permissionsForRole(role, businessType) {
+  const allowedLevels = ROLE_ALLOWED_RISK_LEVELS[role];
+  if (!allowedLevels || !businessType) return [];
+  // require perezoso para evitar ciclos de carga con toolRegistry/tools.
+  const { listTools } = require('../core/toolRegistry');
+  return listTools(businessType)
+    .filter((t) => allowedLevels.includes(t.riskLevel))
+    .map((t) => t.permission);
 }
 
-function canExecuteWrites(context) {
-  return ['tenant_admin', 'tenant_staff', 'owner'].includes(context?.role);
-}
-
-module.exports = { canUseTools, canExecuteWrites };
+module.exports = { permissionsForRole, ROLE_ALLOWED_RISK_LEVELS };
