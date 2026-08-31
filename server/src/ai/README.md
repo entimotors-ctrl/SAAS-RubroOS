@@ -1,38 +1,56 @@
-# Arquitectura de IA (preparación — no conectada todavía)
+# Arquitectura de IA — chat web conectado, WhatsApp todavía NO
 
-Esta carpeta deja listo el núcleo para que un futuro asistente de IA (chat
-web y WhatsApp) use la misma lógica de negocio que ya usa la app web, sin
-duplicarla y sin saltarse el aislamiento multi-tenant.
+El asistente de IA de RubroOS ya funciona por chat web, usando la misma
+lógica de negocio que ya usa la app web, sin duplicarla y sin saltarse el
+aislamiento multi-tenant.
 
 ```
-mensaje → AiContext → orchestrator.proposeToolCall() → toolRegistry.authorize()
-   → (rubro, permiso, argumentos, refs de tenant) → toolRegistry.runTool()
-   → Business Service (server/src/services/*) → SQLite
+POST /api/ai/chat (JWT) → AiContext → chatService.handleChatMessage()
+   → historial (ai_conversations/ai_messages) → system prompt dinámico
+   → AIProvider.chat() → tool_call?
+        → orchestrator.proposeToolCall() → toolRegistry.authorize()
+          (rubro, permiso, argumentos, refs de tenant) → toolRegistry.runTool()
+          → Business Service (server/src/services/*) → SQLite
+        → needsConfirmation? → se corta el loop, responde confirmation_required
+        → si no, el resultado se le devuelve al modelo y se repite (máx. 5 vueltas)
+   → respuesta final en lenguaje natural
 ```
 
 ## Piezas
 
-- **`core/context.js`** — construye el `AiContext` (`userId`, `tenantId`, `businessType`, `role`, `channel`, `permissions`) a partir de una identidad ya autenticada. Nunca acepta un `tenantId` suelto del mensaje del usuario. `permissions` se calcula aquí desde el rol real (`security/permissions.js`), no lo decide el modelo.
-- **`core/toolRegistry.js`** — registro de tools y `authorize()`/`runTool()`. Antes de ejecutar cualquier tool verifica, en orden: existe → rubro coincide con `businessType` → el permiso de la tool está en `context.permissions` → los argumentos pasan `inputSchema` → los `refs` (ids referenciados) pertenecen al tenant. Nunca lanza: siempre devuelve `{ success, data }` o `{ success:false, code, message }`.
-- **`core/validate.js`** — validador ligero de argumentos (tipos, requeridos, rangos, `itemSchema` para listas) pensado para lo que puede alucinar un LLM, no para reemplazar la validación de negocio de los services.
-- **`core/orchestrator.js`** — `proposeToolCall()` / `confirmToolCall()` / `rejectToolCall()`. Decide *cuándo* ejecutar: si la tool no requiere confirmación, se ejecuta ya; si la requiere, queda "pending_confirmation" en `ai_actions` con sus argumentos exactos, y `confirmToolCall()` **siempre** ejecuta esos argumentos guardados — nunca unos nuevos que lleguen en la confirmación. Soporta `idempotencyKey` para no duplicar una acción si el mismo evento llega dos veces.
-- **`core/history.js`** — CRUD de `ai_conversations` / `ai_messages` / `ai_actions`, siempre filtrado por `tenant_id`. `sanitizeForAudit()` oculta cualquier campo que parezca password/token/secret antes de guardar nada.
-- **`core/provider.js`** — interfaz `AIProvider` (`chat({ systemPrompt, messages, tools }) → tool_call | message`). `NullAIProvider` la cumple pero lanza `NotImplementedError` — es el default hasta que se conecte un proveedor real, para no acoplar las tools a un SDK específico.
-- **`tools/*`** — 24 herramientas (14 de escritura/acción + 10 de solo lectura), cada una delegando en `server/src/services/*`. Formato estándar: `permission`, `riskLevel` (`read`/`write`/`destructive`), `requiresConfirmation`, `inputSchema`, `refs`, `handler`.
-- **`security/permissions.js`** — calcula los permisos de un rol directamente del tool registry (no de un catálogo aparte): `tenant_admin` → todo; `tenant_staff` → read+write, nunca `destructive`.
-- **`prompts/`** — `core.js` (reglas fijas), `business.js` (se adapta al rubro/tenant, resuelto desde el contexto), `tools.js` (cómo usar las herramientas), `security.js` (refuerzo de permisos/tenant). `prompts/index.js` compone el prompt completo. Sin secretos interpolados.
+- **`core/context.js`** — construye el `AiContext` (`userId`, `tenantId`, `businessType`, `role`, `channel`, `permissions`) a partir de una identidad ya autenticada (JWT). Nunca acepta un `tenantId` suelto del mensaje del usuario. `permissions` se calcula del rol real (`security/permissions.js`).
+- **`core/toolRegistry.js`** — registro de tools y `authorize()`/`runTool()`: existe → rubro coincide → permiso concedido → argumentos válidos → `refs` pertenecen al tenant. Nunca lanza: siempre `{ success, data }` o `{ success:false, code, message }`.
+- **`core/validate.js`** — validador ligero de argumentos, pensado para lo que puede alucinar un LLM.
+- **`core/orchestrator.js`** — `proposeToolCall()` / `confirmToolCall()` / `rejectToolCall()`. Una tool con `requiresConfirmation` queda "pending_confirmation" en `ai_actions` con sus argumentos exactos; confirmar **siempre** ejecuta esos argumentos guardados, nunca unos nuevos. Soporta `idempotencyKey`.
+- **`core/chatService.js`** — el flujo HTTP completo: resuelve/crea la conversación, arma el system prompt dinámico (rubro, negocio, usuario, rol — `prompts/business.js`), filtra las tools por rubro+permiso antes de ofrecérselas al proveedor, corre el loop de tool calls (límite de 5 por turno) y persiste solo los mensajes en lenguaje natural en `ai_messages` (las llamadas a tools quedan en `ai_actions`, no se duplica el historial).
+- **`core/history.js`** — CRUD de `ai_conversations` / `ai_messages` / `ai_actions`, siempre filtrado por `tenant_id`. `sanitizeForAudit()` oculta credenciales antes de guardar.
+- **`core/provider.js`** — interfaz `AIProvider` (`chat({ systemPrompt, messages, tools }) → tool_call | message`). `NullAIProvider` es el default seguro cuando no hay `AI_API_KEY`.
+- **`core/providerToolAdapter.js`** — convierte el `inputSchema` de una tool a JSON Schema, reutilizable por cualquier proveedor basado en function calling.
+- **`providers/openaiProvider.js`** — el primer `AIProvider` real, sobre la API de OpenAI (fetch nativo, sin SDK). `providers/index.js` elige el proveedor según `AI_API_KEY`/`AI_MODEL` (`gpt-4o-mini` por defecto).
+- **`providers/fakeProviderForTests.js`** — proveedor determinista SOLO para pruebas (`AI_FAKE_PROVIDER=1`), nunca en producción.
+- **`tools/*`** — 24 herramientas (14 de escritura/acción + 10 de lectura), cada una delegando en `server/src/services/*`.
+- **`security/permissions.js`** — permisos por rol calculados del tool registry: `tenant_admin` → todo; `tenant_staff` → read+write, nunca `destructive`.
+- **`prompts/`** — `core.js` (reglas fijas), `business.js` (rubro/negocio/usuario/rol dinámicos), `tools.js`, `security.js`. `prompts/index.js` compone el prompt completo. Sin secretos interpolados.
 
-## Qué falta para que esto haga algo
+## Endpoints
 
-Nada aquí llama a un proveedor de IA todavía. Para tener un asistente funcional falta:
+- `POST /api/ai/chat` — `{ conversationId?, message }` → `{ type: 'message'|'confirmation_required', conversationId, message, actionId? }`.
+- `POST /api/ai/confirm` — `{ actionId }` → ejecuta la acción pendiente con sus argumentos originales.
+- `POST /api/ai/cancel` — `{ actionId }` → marca la acción como rechazada, no ejecuta nada.
+- `GET /api/ai/conversations` — conversaciones del tenant/usuario autenticado.
+- `GET /api/ai/conversations/:id/messages` — historial de una conversación (404 si no es del tenant autenticado).
 
-1. Un endpoint (p. ej. `POST /api/ai/chat`) que reciba un mensaje, resuelva el `AiContext` desde el JWT de la sesión, cree/recupere una conversación (`history.createConversation`) y guarde el mensaje (`history.recordMessage`).
-2. Implementar un `AIProvider` real (OpenAI, Claude, etc.) y pasarle `listTools(businessType)` + el prompt de `prompts/index.js`. Cuando el proveedor pida una tool, el endpoint llama a `orchestrator.proposeToolCall()`.
-3. Si la respuesta trae `needsConfirmation`, mostrarle al usuario el mensaje de confirmación y, si confirma, llamar a `orchestrator.confirmToolCall()` con el mismo `actionId` — nunca reconstruir la acción desde cero.
-4. Conectar `server/src/routes/whatsapp.js` (webhook ya preparado, inactivo) a esta misma capa, resolviendo primero el número de WhatsApp a un usuario/tenant vinculado — sin esa vinculación, WhatsApp no debe poder ejecutar ninguna tool.
+Todas requieren `requireAuth` + `requireTenant` (igual que el resto de la API) y tienen su propio rate limit (40 solicitudes / 5 min).
 
-Deliberadamente no implementado en esta fase para no conectar servicios externos sin que el usuario lo pida explícitamente.
+## Variables de entorno
+
+`AI_API_KEY` (obligatoria para que el chat responda de verdad — sin ella el provider es `NullAIProvider` y el chat falla con un mensaje genérico) y `AI_MODEL` (opcional, default `gpt-4o-mini`). Ninguna de las dos tiene valor real en `server/.env.example`; solo viven en `server/.env`, nunca en el frontend ni en el código.
+
+## Qué falta
+
+WhatsApp (`server/src/routes/whatsapp.js`) sigue inerte — es la siguiente fase: vincular número de WhatsApp a un usuario/tenant y conectar el webhook a `chatService`, reutilizando exactamente esta misma capa.
 
 ## Pruebas
 
-`server/tests/ai-core.js` — 23 checks contra el núcleo real (sin servidor HTTP ni proveedor de IA): aislamiento de tenant, permisos por rol, rubro, confirmaciones, idempotencia, validación de argumentos e historial. Uso: `node tests/ai-core.js`.
+- `server/tests/ai-core.js` — 23 checks del núcleo (sin HTTP ni proveedor).
+- `server/tests/ai-chat.js` — 31 checks de integración HTTP real (requiere el servidor corriendo con `AI_FAKE_PROVIDER=1`).
