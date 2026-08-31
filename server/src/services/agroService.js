@@ -1,5 +1,6 @@
 const db = require('../db');
 const { ServiceError } = require('./errors');
+const { listRows } = require('../utils/crud');
 
 const TARIFAS_DRON = { fumigacion: 350, fertilizacion: 300, mapeo: 250 };
 const MINIMO_SERVICIO_DRON = 500;
@@ -9,6 +10,12 @@ const COSTO_MANO_OBRA_POR_METRO = 8;
 function crearPedido(tenantId, { cliente_id, items } = {}) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new ServiceError('El pedido necesita al menos un ítem');
+  }
+  for (const it of items) {
+    const cantidad = Number(it.cantidad ?? 1);
+    const precio = Number(it.precio_unitario ?? 0);
+    if (!Number.isFinite(cantidad) || cantidad <= 0) throw new ServiceError('Cantidad inválida: debe ser mayor que 0');
+    if (!Number.isFinite(precio) || precio < 0) throw new ServiceError('Precio inválido: no puede ser negativo');
   }
   if (cliente_id) {
     const cliente = db.prepare('SELECT 1 FROM agro_clientes WHERE id = ? AND tenant_id = ?').get(cliente_id, tenantId);
@@ -69,4 +76,15 @@ function cotizarCerca(tenantId, { cliente_nombre, metros, hilos } = {}) {
   return db.prepare('SELECT * FROM agro_cotizaciones_cerca WHERE id = ?').get(info.lastInsertRowid);
 }
 
-module.exports = { crearPedido, actualizarEstadoPedido, cotizarDron, cotizarCerca };
+// ---- Lecturas (reutilizadas por la API REST y por las tools de IA) ----
+
+function consultarInventario(tenantId) {
+  return listRows('agro_productos', tenantId, 'nombre ASC');
+}
+
+function buscarCliente(tenantId, { nombre } = {}) {
+  if (!nombre || !nombre.trim()) throw new ServiceError('Indica un nombre para buscar');
+  return db.prepare('SELECT * FROM agro_clientes WHERE tenant_id = ? AND nombre LIKE ? ORDER BY nombre LIMIT 20').all(tenantId, `%${nombre.trim()}%`);
+}
+
+module.exports = { crearPedido, actualizarEstadoPedido, cotizarDron, cotizarCerca, consultarInventario, buscarCliente };

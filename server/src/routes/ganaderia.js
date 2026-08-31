@@ -62,25 +62,7 @@ router.post('/produccion', (req, res, next) => {
 });
 
 router.get('/produccion/resumen', (req, res) => {
-  const tenantId = req.user.tenant_id;
-  const hoy = db
-    .prepare("SELECT COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche WHERE tenant_id = ? AND fecha = date('now')")
-    .get(tenantId).litros;
-  const semana = db
-    .prepare(
-      `SELECT fecha, COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche
-       WHERE tenant_id = ? AND fecha >= date('now','-6 day') GROUP BY fecha ORDER BY fecha`
-    )
-    .all(tenantId);
-  const porAnimal = db
-    .prepare(
-      `SELECT a.arete, a.nombre, COALESCE(SUM(p.litros),0) AS litros FROM ganaderia_animales a
-       LEFT JOIN ganaderia_produccion_leche p ON p.animal_id = a.id AND p.tenant_id = a.tenant_id AND p.fecha >= date('now','-6 day')
-       WHERE a.tenant_id = ? GROUP BY a.id ORDER BY litros DESC`
-    )
-    .all(tenantId);
-  const totalAnimales = db.prepare("SELECT COUNT(*) AS n FROM ganaderia_animales WHERE tenant_id = ? AND estado = 'activo'").get(tenantId).n;
-  res.json({ litrosHoy: hoy, ultimaSemana: semana, porAnimal, totalAnimales });
+  res.json(ganaderiaService.resumenProduccion(req.user.tenant_id));
 });
 
 module.exports = router;

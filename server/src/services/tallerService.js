@@ -1,5 +1,6 @@
 const db = require('../db');
 const { ServiceError } = require('./errors');
+const { listRows } = require('../utils/crud');
 
 /**
  * Lógica de negocio del Taller, reutilizable desde la API REST y, más
@@ -11,6 +12,13 @@ const { ServiceError } = require('./errors');
 function registrarVenta(tenantId, { cliente_id, tipo, items, pagado_inicial } = {}) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new ServiceError('La venta necesita al menos un ítem');
+  }
+  for (const it of items) {
+    if (!it.descripcion || !String(it.descripcion).trim()) throw new ServiceError('Cada ítem necesita una descripción');
+    const cantidad = Number(it.cantidad ?? 1);
+    const precio = Number(it.precio_unitario ?? 0);
+    if (!Number.isFinite(cantidad) || cantidad <= 0) throw new ServiceError(`Cantidad inválida para "${it.descripcion}": debe ser mayor que 0`);
+    if (!Number.isFinite(precio) || precio < 0) throw new ServiceError(`Precio inválido para "${it.descripcion}": no puede ser negativo`);
   }
   if (cliente_id) {
     const cliente = db.prepare('SELECT 1 FROM taller_clientes WHERE id = ? AND tenant_id = ?').get(cliente_id, tenantId);
@@ -55,4 +63,15 @@ function registrarAbono(tenantId, ventaId, monto) {
   return db.prepare('SELECT * FROM taller_ventas WHERE id = ?').get(venta.id);
 }
 
-module.exports = { registrarVenta, registrarAbono };
+// ---- Lecturas (reutilizadas por la API REST y por las tools de IA) ----
+
+function consultarInventario(tenantId) {
+  return listRows('taller_inventario', tenantId, 'nombre ASC');
+}
+
+function buscarCliente(tenantId, { nombre } = {}) {
+  if (!nombre || !nombre.trim()) throw new ServiceError('Indica un nombre para buscar');
+  return db.prepare('SELECT * FROM taller_clientes WHERE tenant_id = ? AND nombre LIKE ? ORDER BY nombre LIMIT 20').all(tenantId, `%${nombre.trim()}%`);
+}
+
+module.exports = { registrarVenta, registrarAbono, consultarInventario, buscarCliente };

@@ -5,6 +5,13 @@ function crearCuenta(tenantId, { cliente_id, barbero_id, items } = {}) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new ServiceError('La cuenta necesita al menos un ítem');
   }
+  for (const it of items) {
+    if (!it.descripcion || !String(it.descripcion).trim()) throw new ServiceError('Cada ítem necesita una descripción');
+    const cantidad = Number(it.cantidad ?? 1);
+    const precio = Number(it.precio_unitario ?? 0);
+    if (!Number.isFinite(cantidad) || cantidad <= 0) throw new ServiceError(`Cantidad inválida para "${it.descripcion}": debe ser mayor que 0`);
+    if (!Number.isFinite(precio) || precio < 0) throw new ServiceError(`Precio inválido para "${it.descripcion}": no puede ser negativo`);
+  }
   if (cliente_id) {
     const cliente = db.prepare('SELECT 1 FROM barberia_clientes WHERE id = ? AND tenant_id = ?').get(cliente_id, tenantId);
     if (!cliente) throw new ServiceError('El cliente indicado no existe o no pertenece a tu negocio');
@@ -38,4 +45,25 @@ function cobrarCuenta(tenantId, cuentaId, metodoPago) {
   return db.prepare('SELECT * FROM barberia_cuentas WHERE id = ?').get(cuenta.id);
 }
 
-module.exports = { crearCuenta, cobrarCuenta };
+// ---- Lecturas (reutilizadas por la API REST y por las tools de IA) ----
+
+function consultarCitas(tenantId, { desde } = {}) {
+  const fechaDesde = desde || new Date().toISOString().slice(0, 10);
+  return db
+    .prepare(
+      `SELECT c.*, cl.nombre AS cliente_nombre, b.nombre AS barbero_nombre, s.nombre AS servicio_nombre
+       FROM barberia_citas c
+       LEFT JOIN barberia_clientes cl ON cl.id = c.cliente_id AND cl.tenant_id = c.tenant_id
+       LEFT JOIN barberia_barberos b ON b.id = c.barbero_id AND b.tenant_id = c.tenant_id
+       LEFT JOIN barberia_servicios s ON s.id = c.servicio_id AND s.tenant_id = c.tenant_id
+       WHERE c.tenant_id = ? AND c.fecha >= ? ORDER BY c.fecha ASC, c.hora ASC LIMIT 50`
+    )
+    .all(tenantId, fechaDesde);
+}
+
+function buscarCliente(tenantId, { nombre } = {}) {
+  if (!nombre || !nombre.trim()) throw new ServiceError('Indica un nombre para buscar');
+  return db.prepare('SELECT * FROM barberia_clientes WHERE tenant_id = ? AND nombre LIKE ? ORDER BY nombre LIMIT 20').all(tenantId, `%${nombre.trim()}%`);
+}
+
+module.exports = { crearCuenta, cobrarCuenta, consultarCitas, buscarCliente };

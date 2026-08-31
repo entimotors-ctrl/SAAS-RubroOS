@@ -70,4 +70,23 @@ function cancelarMembresia(tenantId, membresiaId) {
   return db.prepare('SELECT * FROM carwash_membresias WHERE id = ?').get(m.id);
 }
 
-module.exports = { crearTurno, actualizarEstadoTurno, crearMembresia, renovarMembresia, cancelarMembresia };
+// ---- Lecturas (reutilizadas por la API REST y por las tools de IA) ----
+
+function consultarTurnos(tenantId) {
+  return db
+    .prepare(
+      `SELECT t.*, c.nombre AS cliente_nombre, v.placa, s.nombre AS servicio_nombre FROM carwash_turnos t
+       LEFT JOIN carwash_clientes c ON c.id = t.cliente_id AND c.tenant_id = t.tenant_id
+       LEFT JOIN carwash_vehiculos v ON v.id = t.vehiculo_id AND v.tenant_id = t.tenant_id
+       LEFT JOIN carwash_servicios s ON s.id = t.servicio_id AND s.tenant_id = t.tenant_id
+       WHERE t.tenant_id = ? AND t.estado IN ('en_cola', 'lavando') ORDER BY t.id ASC`
+    )
+    .all(tenantId);
+}
+
+function buscarCliente(tenantId, { nombre } = {}) {
+  if (!nombre || !nombre.trim()) throw new ServiceError('Indica un nombre para buscar');
+  return db.prepare('SELECT * FROM carwash_clientes WHERE tenant_id = ? AND nombre LIKE ? ORDER BY nombre LIMIT 20').all(tenantId, `%${nombre.trim()}%`);
+}
+
+module.exports = { crearTurno, actualizarEstadoTurno, crearMembresia, renovarMembresia, cancelarMembresia, consultarTurnos, buscarCliente };

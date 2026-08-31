@@ -12,6 +12,16 @@ const db = require('../db');
  * Así una petición manipulada no puede enlazar (ni leer indirectamente vía
  * JOIN) un registro de otro negocio.
  */
+/**
+ * Lista las filas de una tabla aislada por tenant_id. Extraído de simpleCrud
+ * para que las tools de lectura de la IA (server/src/ai) puedan reutilizar
+ * exactamente la misma consulta que ya usa la API REST, en vez de
+ * duplicarla.
+ */
+function listRows(table, tenantId, orderBy = 'id DESC') {
+  return db.prepare(`SELECT * FROM ${table} WHERE tenant_id = ? ORDER BY ${orderBy}`).all(tenantId);
+}
+
 function simpleCrud(table, fields, { orderBy = 'id DESC', required = [], refs = {} } = {}) {
   const router = express.Router();
   const cols = fields.join(', ');
@@ -36,8 +46,7 @@ function simpleCrud(table, fields, { orderBy = 'id DESC', required = [], refs = 
   }
 
   router.get('/', (req, res) => {
-    const rows = db.prepare(`SELECT * FROM ${table} WHERE tenant_id = ? ORDER BY ${orderBy}`).all(req.user.tenant_id);
-    res.json(rows);
+    res.json(listRows(table, req.user.tenant_id, orderBy));
   });
 
   router.post('/', (req, res) => {
@@ -79,4 +88,4 @@ function simpleCrud(table, fields, { orderBy = 'id DESC', required = [], refs = 
   return router;
 }
 
-module.exports = { simpleCrud };
+module.exports = { simpleCrud, listRows };
