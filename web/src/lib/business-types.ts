@@ -1,6 +1,6 @@
-import { CarFront, Milk, Scissors, Sprout, TrendingUp, Wrench, type LucideIcon } from 'lucide-react';
+import { CarFront, Milk, Scissors, Sprout, Wrench, type LucideIcon } from 'lucide-react';
 
-export type BusinessTypeId = 'taller' | 'barberia' | 'agro' | 'inversiones' | 'ganaderia' | 'carwash';
+export type BusinessTypeId = 'taller' | 'barberia' | 'agro' | 'ganaderia' | 'carwash';
 
 export interface BusinessTypeConfig {
   id: BusinessTypeId;
@@ -39,15 +39,6 @@ export const BUSINESS_TYPES: BusinessTypeConfig[] = [
     color: 'green',
     accent: '#16a34a',
     accentSoft: '#86efac',
-  },
-  {
-    id: 'inversiones',
-    label: 'Catálogo de Inversiones',
-    tagline: 'Oportunidades, cupos e interesados en un solo lugar.',
-    icon: TrendingUp,
-    color: 'blue',
-    accent: '#2563eb',
-    accentSoft: '#93c5fd',
   },
   {
     id: 'ganaderia',

@@ -123,24 +123,6 @@ CREATE TABLE IF NOT EXISTS agro_cotizaciones_cerca (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- ===== INVERSIONES =====
-CREATE TABLE IF NOT EXISTS inversiones_categorias (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, nombre TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS inversiones_oportunidades (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, categoria_id INTEGER,
-  nombre TEXT NOT NULL, descripcion TEXT, monto_minimo REAL NOT NULL DEFAULT 0,
-  retorno_pct REAL NOT NULL DEFAULT 0, plazo_meses INTEGER NOT NULL DEFAULT 12,
-  riesgo TEXT NOT NULL DEFAULT 'medio', cupos_totales INTEGER NOT NULL DEFAULT 0,
-  cupos_disponibles INTEGER NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'abierta',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS inversiones_interesados (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, oportunidad_id INTEGER,
-  nombre TEXT NOT NULL, telefono TEXT, email TEXT, monto_interes REAL NOT NULL DEFAULT 0,
-  estado TEXT NOT NULL DEFAULT 'nuevo', created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 -- ===== GANADERIA Y LECHERIA =====
 CREATE TABLE IF NOT EXISTS ganaderia_animales (
   id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL,

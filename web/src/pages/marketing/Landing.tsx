@@ -17,7 +17,7 @@ const PLANES = [
 ];
 
 const PASOS = [
-  { n: '1', titulo: 'Elige tu rubro', texto: 'Taller, barbería, agro, inversiones, ganadería o carwash — el sistema se adapta a tu negocio, no al revés.' },
+  { n: '1', titulo: 'Elige tu rubro', texto: 'Taller, barbería, agro, ganadería o carwash — el sistema se adapta a tu negocio, no al revés.' },
   { n: '2', titulo: 'Crea tu cuenta', texto: 'Sin tarjeta, sin instalar nada. En menos de un minuto tienes tu propio dashboard.' },
   { n: '3', titulo: 'Empieza a vender', texto: 'Tu panel ya viene con datos de muestra para que veas el sistema funcionando desde el primer clic.' },
 ];
@@ -107,8 +107,8 @@ export default function Landing() {
               transition={{ duration: 0.6, delay: 0.16 }}
               className="mt-5 max-w-lg text-base text-slate-400"
             >
-              Un mismo panel, seis negocios distintos. Talleres, barberías, agropecuarias, carwash, ganadería y catálogos de
-              inversión — cada uno con las herramientas exactas que necesita, listas en minutos.
+              Un mismo panel, cinco negocios distintos. Talleres, barberías, agropecuarias, carwash y ganadería —
+              cada uno con las herramientas exactas que necesita, listas en minutos.
             </motion.p>
 
             <motion.div
@@ -128,7 +128,7 @@ export default function Landing() {
                 whileTap={{ scale: 0.97 }}
                 className="flex items-center justify-center gap-2 rounded-xl border border-white/15 px-6 py-3 text-sm font-semibold text-slate-200 hover:bg-white/5"
               >
-                Ver los 6 sistemas
+                Ver los 5 sistemas
               </motion.a>
             </motion.div>
 
@@ -156,7 +156,7 @@ export default function Landing() {
       <Reveal className="border-y border-white/10 bg-white/[0.02] px-6 py-8">
         <div className="mx-auto grid max-w-5xl grid-cols-2 gap-6 text-center sm:grid-cols-4">
           {[
-            { to: 6, suffix: '', label: 'Rubros disponibles' },
+            { to: 5, suffix: '', label: 'Rubros disponibles' },
             { to: 30, suffix: '+', label: 'Módulos listos para usar' },
             { to: 14, suffix: '', label: 'Días de prueba gratis' },
             { to: 3, suffix: '', label: 'Pasos para empezar' },

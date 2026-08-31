@@ -74,26 +74,6 @@ function seedAgro(tenantId) {
   db.prepare('INSERT INTO agro_pedido_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?,?,?,?,?)').run(pedido.lastInsertRowid, 1, 2, 1850, 3700);
 }
 
-function seedInversiones(tenantId) {
-  const cat = db.prepare('INSERT INTO inversiones_categorias (tenant_id, nombre) VALUES (?,?)').run(tenantId, 'Bienes Raíces');
-  db.prepare('INSERT INTO inversiones_categorias (tenant_id, nombre) VALUES (?,?)').run(tenantId, 'Agroindustria');
-  const op = db
-    .prepare(
-      `INSERT INTO inversiones_oportunidades (tenant_id, categoria_id, nombre, descripcion, monto_minimo, retorno_pct, plazo_meses, riesgo, cupos_totales, cupos_disponibles, estado)
-       VALUES (?,?,?,?,?,?,?,?,?,?,'abierta')`
-    )
-    .run(tenantId, cat.lastInsertRowid, 'Residencial Vista Verde', 'Financiamiento para la fase 2 del proyecto residencial.', 50000, 14, 18, 'medio', 20, 14);
-  db.prepare('INSERT INTO inversiones_interesados (tenant_id, oportunidad_id, nombre, telefono, email, monto_interes, estado) VALUES (?,?,?,?,?,?,?)').run(
-    tenantId,
-    op.lastInsertRowid,
-    'Ricardo Bueso',
-    '9944-5566',
-    'ricardo@example.com',
-    75000,
-    'nuevo'
-  );
-}
-
 function seedGanaderia(tenantId) {
   // Razas típicas de Olancho (zona ganadera-lechera más importante de Honduras: Juticalpa y Catacamas):
   // Gyr Lechero y Pardo Suizo para leche, Brahman como base de cría por su resistencia al trópico.
@@ -153,11 +133,6 @@ function ensureSeed() {
       crearUsuario(agro, 'agro', 'demo@agro.test', 'Elena (Agro)');
       crearUsuarioMaestro(agro, 'agro');
       seedAgro(agro);
-
-      const inversiones = crearTenant('inversiones', 'Inversiones Bueso & Asoc.', 'inversiones-bueso');
-      crearUsuario(inversiones, 'inversiones', 'demo@inversiones.test', 'Ricardo (Inversiones)');
-      crearUsuarioMaestro(inversiones, 'inversiones');
-      seedInversiones(inversiones);
 
       const ganaderia = crearTenant('ganaderia', 'Hacienda La Esperanza — Catacamas, Olancho', 'hacienda-la-esperanza');
       crearUsuario(ganaderia, 'ganaderia', 'demo@ganaderia.test', 'Don Chepe (Ganadería)');

@@ -2,7 +2,6 @@ import { useAuth } from '../../lib/auth-context';
 import TallerApp from './taller/TallerApp';
 import BarberiaApp from './barberia/BarberiaApp';
 import AgroApp from './agro/AgroApp';
-import InversionesApp from './inversiones/InversionesApp';
 import GanaderiaApp from './ganaderia/GanaderiaApp';
 import CarwashApp from './carwash/CarwashApp';
 
@@ -16,8 +15,6 @@ export default function AppShell() {
       return <BarberiaApp />;
     case 'agro':
       return <AgroApp />;
-    case 'inversiones':
-      return <InversionesApp />;
     case 'ganaderia':
       return <GanaderiaApp />;
     case 'carwash':

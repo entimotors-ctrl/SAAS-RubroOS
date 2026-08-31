@@ -1,7 +1,7 @@
 const HEX_POINTS = '21,12 16.5,19.79 7.5,19.79 3,12 7.5,4.21 16.5,4.21';
 
 /**
- * Marca de RubroOS: un hexágono (los 6 rubros) con un núcleo central
+ * Marca de RubroOS: un hexágono (los rubros del sistema) con un núcleo central
  * (la plataforma que los une). Se usa como favicon y como logomark en headers.
  */
 export function LogoMark({ className = '', gradientId = 'rubroos-logo' }: { className?: string; gradientId?: string }) {

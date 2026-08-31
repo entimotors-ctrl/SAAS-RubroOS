@@ -9,7 +9,6 @@ const ownerRoutes = require('./routes/owner');
 const tallerRoutes = require('./routes/taller');
 const barberiaRoutes = require('./routes/barberia');
 const agroRoutes = require('./routes/agro');
-const inversionesRoutes = require('./routes/inversiones');
 const ganaderiaRoutes = require('./routes/ganaderia');
 const carwashRoutes = require('./routes/carwash');
 
@@ -28,7 +27,6 @@ app.use('/api/owner', requireAuth, requireOwner, ownerRoutes);
 app.use('/api/taller', requireAuth, requireTenant, requireBusinessType('taller'), tallerRoutes);
 app.use('/api/barberia', requireAuth, requireTenant, requireBusinessType('barberia'), barberiaRoutes);
 app.use('/api/agro', requireAuth, requireTenant, requireBusinessType('agro'), agroRoutes);
-app.use('/api/inversiones', requireAuth, requireTenant, requireBusinessType('inversiones'), inversionesRoutes);
 app.use('/api/ganaderia', requireAuth, requireTenant, requireBusinessType('ganaderia'), ganaderiaRoutes);
 app.use('/api/carwash', requireAuth, requireTenant, requireBusinessType('carwash'), carwashRoutes);
 

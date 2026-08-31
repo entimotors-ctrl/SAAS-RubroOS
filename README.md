@@ -2,7 +2,7 @@
 
 **El sistema operativo para tu negocio. Elige tu rubro.**
 
-SaaS multi-tenant con 6 sistemas de negocio listos para usar: Taller de Motos y Vehículos, Barbería, Agropecuario, Catálogo de Inversiones, Ganadería y Lechería, y Carwash. Cada rubro tiene su propio dashboard con módulos reales (POS, agenda, inventario, cotizadores, etc.), y hay un panel aparte para el dueño del SaaS que administra todos los negocios (tenants) de la plataforma.
+SaaS multi-tenant con 5 sistemas de negocio listos para usar: Taller de Motos y Vehículos, Barbería, Agropecuario, Ganadería y Lechería, y Carwash. Cada rubro tiene su propio dashboard con módulos reales (POS, agenda, inventario, cotizadores, etc.), y hay un panel aparte para el dueño del SaaS que administra todos los negocios (tenants) de la plataforma.
 
 ## Arquitectura
 
@@ -30,7 +30,7 @@ Corre en `http://localhost:5173` y hace proxy de `/api` hacia el backend. Abre e
 ## Flujo de la aplicación
 
 1. **`/`** — Landing de marketing.
-2. **`/elegir-sistema`** — El cliente elige su rubro (uno de los 6 sistemas).
+2. **`/elegir-sistema`** — El cliente elige su rubro (uno de los 5 sistemas).
 3. **`/login/:rubro`** o **`/registro/:rubro`** — Inicio de sesión o creación de cuenta, ya filtrado por el rubro elegido.
 4. **`/app`** — Dashboard del negocio, con los módulos propios de su rubro.
 5. **`/owner/login`** → **`/owner`** — Panel exclusivo del dueño del SaaS: métricas globales, MRR estimado, y administración de todos los tenants (cambiar plan, suspender/reactivar).
@@ -41,7 +41,7 @@ Corre en `http://localhost:5173` y hace proxy de `/api` hacia el backend. Abre e
 - Correo: el que definas en `OWNER_EMAIL`
 - Contraseña: la que definas en `OWNER_SEED_PASSWORD` (ver `server/.env.example`) — solo se usa la primera vez que arranca el servidor, para crear la cuenta owner
 
-**Usuario maestro de pruebas** — mismo correo y contraseña en los 6 rubros (solo cambia el rubro que eliges al iniciar sesión):
+**Usuario maestro de pruebas** — mismo correo y contraseña en los 5 rubros (solo cambia el rubro que eliges al iniciar sesión):
 - Correo: `maestro@rubroos.test`
 - Contraseña: `Maestro2026!`
 
@@ -52,7 +52,6 @@ Corre en `http://localhost:5173` y hace proxy de `/api` hacia el backend. Abre e
 | Taller | `demo@taller.test` |
 | Barbería | `demo@barberia.test` |
 | Agropecuario | `demo@agro.test` |
-| Inversiones | `demo@inversiones.test` |
 | Ganadería y Lechería | `demo@ganaderia.test` |
 | Carwash | `demo@carwash.test` |
 
