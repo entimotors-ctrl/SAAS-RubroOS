@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../lib/auth-context';
 import type { BusinessTypeConfig } from '../lib/business-types';
 import { LogoMark } from './Logo';
+import { ChatWidget } from './ChatWidget';
 
 export interface NavItem {
   id: string;
@@ -96,6 +97,7 @@ export function DashboardShell({
         </nav>
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
+      <ChatWidget business={business} />
     </div>
   );
 }
