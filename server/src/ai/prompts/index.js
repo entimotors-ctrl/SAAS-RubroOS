@@ -8,8 +8,8 @@ const { SECURITY_PROMPT } = require('./security');
  * tenant + cómo usar las tools + reglas de seguridad. Ningún secreto ni
  * variable de entorno se interpola aquí.
  */
-function buildFullPrompt({ businessType, tenantName }) {
-  return [CORE_PROMPT, buildBusinessPrompt({ businessType, tenantName }), TOOLS_PROMPT, SECURITY_PROMPT].join('\n\n');
+function buildFullPrompt({ businessType, tenantName, userName, role }) {
+  return [CORE_PROMPT, buildBusinessPrompt({ businessType, tenantName, userName, role }), TOOLS_PROMPT, SECURITY_PROMPT].join('\n\n');
 }
 
 module.exports = { buildFullPrompt, CORE_PROMPT, buildBusinessPrompt, TOOLS_PROMPT, SECURITY_PROMPT };

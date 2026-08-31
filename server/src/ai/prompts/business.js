@@ -11,9 +11,21 @@ const RUBRO_CONTEXTO = {
   carwash: 'un carwash: cola de turnos, catálogo de servicios de lavado, membresías de lavado ilimitado.',
 };
 
-function buildBusinessPrompt({ businessType, tenantName }) {
+const ROLE_LABEL = {
+  tenant_admin: 'administrador del negocio',
+  tenant_staff: 'colaborador del negocio (permisos limitados: no puede cancelar ni eliminar información crítica)',
+};
+
+function buildBusinessPrompt({ businessType, tenantName, userName, role }) {
   const contexto = RUBRO_CONTEXTO[businessType] || 'un negocio en RubroOS.';
-  return `Estás ayudando a "${tenantName || 'este negocio'}", que es ${contexto}\nSolo puedes usar las herramientas habilitadas para este rubro (${businessType}) — nunca intentes usar una herramienta de otro rubro, aunque el usuario la mencione.`;
+  const rolLabel = ROLE_LABEL[role] || role || 'usuario';
+  return [
+    `Negocio: ${tenantName || 'este negocio'}`,
+    `Rubro: ${businessType} — ${contexto}`,
+    `Usuario: ${userName || 'sin nombre registrado'}`,
+    `Rol: ${rolLabel}`,
+    'Solo puedes usar las herramientas habilitadas para este rubro y este rol — nunca intentes usar una herramienta de otro rubro ni una que este usuario no tenga permitida, aunque te lo pida explícitamente.',
+  ].join('\n');
 }
 
 module.exports = { buildBusinessPrompt };

@@ -14,6 +14,7 @@ const barberiaRoutes = require('./routes/barberia');
 const agroRoutes = require('./routes/agro');
 const ganaderiaRoutes = require('./routes/ganaderia');
 const carwashRoutes = require('./routes/carwash');
+const aiRoutes = require('./routes/ai');
 
 require('./seed').ensureSeed();
 
@@ -39,6 +40,10 @@ app.use('/api/barberia', requireAuth, requireTenant, requireBusinessType('barber
 app.use('/api/agro', requireAuth, requireTenant, requireBusinessType('agro'), agroRoutes);
 app.use('/api/ganaderia', requireAuth, requireTenant, requireBusinessType('ganaderia'), ganaderiaRoutes);
 app.use('/api/carwash', requireAuth, requireTenant, requireBusinessType('carwash'), carwashRoutes);
+
+// Chat de IA: no requireBusinessType — funciona igual para cualquier rubro,
+// el propio AiContext ya trae el businessType del JWT y filtra las tools.
+app.use('/api/ai', requireAuth, requireTenant, aiRoutes);
 
 // Webhook de WhatsApp: sin requireAuth (Meta no manda nuestro JWT), inerte
 // hasta que exista vinculación número→usuario. Ver server/src/routes/whatsapp.js.
