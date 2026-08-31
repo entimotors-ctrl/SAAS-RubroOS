@@ -1,5 +1,8 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 
 const { BUSINESS_TYPES } = require('./business-types');
 const { requireAuth, requireOwner, requireTenant, requireBusinessType } = require('./middleware/auth');
@@ -15,7 +18,14 @@ const carwashRoutes = require('./routes/carwash');
 require('./seed').ensureSeed();
 
 const app = express();
-app.use(cors());
+
+app.use(helmet());
+
+// CORS_ORIGIN acepta una lista separada por comas. En desarrollo, si no se
+// define, cae de vuelta al origen por defecto de Vite para no romper el flujo local.
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',').map((o) => o.trim());
+app.use(cors({ origin: corsOrigins }));
+
 app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ ok: true, name: 'RubroOS API' }));
@@ -35,6 +45,11 @@ app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 app.use((err, req, res, next) => {
   if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
     return res.status(409).json({ error: 'Ya existe un registro con esos datos (por ejemplo, un arete duplicado).' });
+  }
+  // Errores de la capa de servicios (server/src/services/*): ya vienen con
+  // un mensaje seguro para mostrar al usuario y el status HTTP correcto.
+  if (err.name === 'ServiceError' && err.status) {
+    return res.status(err.status).json({ error: err.message });
   }
   console.error(err);
   res.status(500).json({ error: 'Error interno del servidor' });

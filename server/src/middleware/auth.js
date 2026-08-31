@@ -1,6 +1,12 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'rubroos-dev-secret-cambia-esto-en-produccion';
+if (!process.env.JWT_SECRET) {
+  throw new Error(
+    'Falta la variable de entorno JWT_SECRET. Defínela en server/.env (copia server/.env.example) antes de iniciar el servidor. ' +
+      'Genera un valor con: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"'
+  );
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 
 function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });

@@ -1,10 +1,21 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const db = require('../db');
 const { signToken, requireAuth } = require('../middleware/auth');
 const { BUSINESS_TYPE_IDS } = require('../business-types');
 
 const router = express.Router();
+
+// Protección contra fuerza bruta: solo en los endpoints de autenticación,
+// no en el resto de la API.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.' },
+});
 
 function slugify(text) {
   return text
@@ -27,7 +38,7 @@ function uniqueSlug(base) {
   return slug;
 }
 
-router.post('/registro', (req, res) => {
+router.post('/registro', authLimiter, (req, res) => {
   const { business_type, empresa_nombre, nombre, email, password } = req.body || {};
   if (!BUSINESS_TYPE_IDS.includes(business_type)) {
     return res.status(400).json({ error: 'Rubro inválido' });
@@ -73,7 +84,7 @@ router.post('/registro', (req, res) => {
   });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', authLimiter, (req, res) => {
   const { business_type, email, password } = req.body || {};
   if (!BUSINESS_TYPE_IDS.includes(business_type)) {
     return res.status(400).json({ error: 'Rubro inválido' });
@@ -103,7 +114,7 @@ router.post('/login', (req, res) => {
   });
 });
 
-router.post('/owner-login', (req, res) => {
+router.post('/owner-login', authLimiter, (req, res) => {
   const { email, password } = req.body || {};
   const user = db.prepare("SELECT * FROM users WHERE email = ? AND role = 'owner'").get(email);
   if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
