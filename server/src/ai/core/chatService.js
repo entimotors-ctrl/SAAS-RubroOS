@@ -64,7 +64,7 @@ function toProviderToolList(tools) {
   return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
 }
 
-async function handleChatMessage({ context, conversationId, userMessage, provider }) {
+async function handleChatMessage({ context, conversationId, userMessage, provider, idempotencyKey }) {
   const activeProvider = provider || createProvider();
   const conversation = resolveConversation(context, conversationId);
   history.recordMessage(conversation.id, context.tenantId, 'user', userMessage);
@@ -90,8 +90,18 @@ async function handleChatMessage({ context, conversationId, userMessage, provide
       return { type: 'message', conversationId: conversation.id, message: text };
     }
 
-    // tool_call
-    const toolResult = proposeToolCall({ conversationId: conversation.id, context, toolName: response.toolName, args: response.args });
+    // tool_call. idempotencyKey solo viene de canales que puedan reenviar el
+    // mismo mensaje (WhatsApp) — el chat web no manda ninguno, así que su
+    // comportamiento no cambia. Solo se aplica a la PRIMERA tool call del
+    // turno: si el modelo encadena varias, únicamente la primera puede
+    // corresponder al mensaje entrante que se está deduplicando.
+    const toolResult = proposeToolCall({
+      conversationId: conversation.id,
+      context,
+      toolName: response.toolName,
+      args: response.args,
+      idempotencyKey: iteration === 0 ? idempotencyKey : undefined,
+    });
 
     if (toolResult.needsConfirmation) {
       history.recordMessage(conversation.id, context.tenantId, 'assistant', toolResult.message);

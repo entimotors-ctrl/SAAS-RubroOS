@@ -49,8 +49,26 @@ function parseIncomingEvents(payload) {
   return out;
 }
 
+// SOLO para pruebas automatizadas (WHATSAPP_FAKE_TRANSPORT=1, nunca en
+// producción): en vez de llamar a la Graph API de verdad, guarda lo que se
+// hubiera mandado — así los tests pueden verificar la respuesta calculada
+// sin depender de red ni de credenciales reales de Meta. Mismo espíritu que
+// AI_FAKE_PROVIDER para los proveedores de IA.
+const outbox = [];
+function getOutbox() {
+  return outbox;
+}
+function clearOutbox() {
+  outbox.length = 0;
+}
+
 /** Manda un mensaje de texto vía la Graph API. No sabe nada del orchestrator — solo habla el wire de Meta. */
 async function sendMessage({ to, text, phoneNumberId, accessToken }) {
+  if (process.env.WHATSAPP_FAKE_TRANSPORT === '1') {
+    outbox.push({ to, text });
+    return { messaging_product: 'whatsapp', fake: true };
+  }
+
   const pnId = phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
   const token = accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
   if (!pnId || !token) throw new Error('WhatsApp no está configurado (faltan WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_ACCESS_TOKEN)');
@@ -140,4 +158,4 @@ function splitMessage(text, maxLen = MAX_MESSAGE_LENGTH) {
   return chunks;
 }
 
-module.exports = { parseIncomingEvents, sendMessage, toWhatsAppText, splitMessage, MAX_MESSAGE_LENGTH };
+module.exports = { parseIncomingEvents, sendMessage, toWhatsAppText, splitMessage, MAX_MESSAGE_LENGTH, getOutbox, clearOutbox };

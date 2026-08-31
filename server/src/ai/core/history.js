@@ -43,6 +43,19 @@ function listConversations(tenantId, { userId } = {}) {
   return db.prepare('SELECT * FROM ai_conversations WHERE tenant_id = ? ORDER BY id DESC').all(tenantId);
 }
 
+/**
+ * Para canales sin un conversationId propio del lado del cliente (WhatsApp:
+ * no hay localStorage, el hilo se identifica solo por el número). Devuelve
+ * la conversación más reciente para ese tenant+canal+identificador externo,
+ * o undefined si todavía no existe una (el caller debe crearla con
+ * createConversation en ese caso).
+ */
+function findConversationByChannel({ tenantId, channel, externalUserId }) {
+  return db
+    .prepare('SELECT * FROM ai_conversations WHERE tenant_id = ? AND channel = ? AND external_user_id = ? ORDER BY id DESC LIMIT 1')
+    .get(tenantId, channel, externalUserId);
+}
+
 // ---- Mensajes ----
 
 function recordMessage(conversationId, tenantId, role, content) {
@@ -85,6 +98,18 @@ function getAction(actionId, tenantId) {
   return db.prepare('SELECT * FROM ai_actions WHERE id = ? AND tenant_id = ?').get(actionId, tenantId);
 }
 
+/**
+ * Acciones esperando confirmación en una conversación. Usado por el
+ * detector de intención de confirmación de WhatsApp (server/src/whatsapp/
+ * confirmationIntent.js) para decidir si un "sí"/"no" suelto resuelve una
+ * sola acción sin ambigüedad, o si hay que preguntar cuál.
+ */
+function listPendingActions(conversationId, tenantId) {
+  return db
+    .prepare("SELECT * FROM ai_actions WHERE conversation_id = ? AND tenant_id = ? AND status = 'pending_confirmation' ORDER BY id ASC")
+    .all(conversationId, tenantId);
+}
+
 function updateActionStatus(actionId, tenantId, status, result) {
   db.prepare("UPDATE ai_actions SET status = ?, result = ?, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?").run(
     status,
@@ -100,10 +125,12 @@ module.exports = {
   createConversation,
   getConversation,
   listConversations,
+  findConversationByChannel,
   recordMessage,
   listMessages,
   findExistingAction,
   createAction,
   getAction,
   updateActionStatus,
+  listPendingActions,
 };
