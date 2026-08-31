@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const express = require('express');
 const cors = require('cors');
@@ -39,6 +39,10 @@ app.use('/api/barberia', requireAuth, requireTenant, requireBusinessType('barber
 app.use('/api/agro', requireAuth, requireTenant, requireBusinessType('agro'), agroRoutes);
 app.use('/api/ganaderia', requireAuth, requireTenant, requireBusinessType('ganaderia'), ganaderiaRoutes);
 app.use('/api/carwash', requireAuth, requireTenant, requireBusinessType('carwash'), carwashRoutes);
+
+// Webhook de WhatsApp: sin requireAuth (Meta no manda nuestro JWT), inerte
+// hasta que exista vinculación número→usuario. Ver server/src/routes/whatsapp.js.
+app.use('/api/whatsapp', require('./routes/whatsapp'));
 
 app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 // eslint-disable-next-line no-unused-vars
