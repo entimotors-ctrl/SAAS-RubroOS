@@ -328,6 +328,24 @@ async function runChecks() {
   const healthTrasFallo = await fetch(`${BASE.replace('/api', '')}/api/health`);
   check('El servidor sigue vivo después del fallo simulado de envío', healthTrasFallo.status === 200);
 
+  console.log('\n=== 12b) Rate limiting: por teléfono, no bloquea el uso normal ===');
+  const numeroRateLimit = `504777${RUN}`.slice(0, 12);
+  linkIdentity(tallerA.tenantId, tallerA.userId, numeroRateLimit);
+  let ultimaRespuestaRateLimit;
+  for (let i = 0; i < 21; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await postWebhook(metaPayload(`wamid.rl.${RUN}.${i}`, numeroRateLimit, 'hola'));
+  }
+  await new Promise((r) => setTimeout(r, 900)); // deja que las 21 terminen de procesarse async
+  ultimaRespuestaRateLimit = await lastReplyTo(numeroRateLimit);
+  check(
+    'Tras superar el límite por número, la respuesta 21 queda cortada por el rate limiter (no llega a la IA)',
+    ultimaRespuestaRateLimit?.includes('demasiados mensajes'),
+    ultimaRespuestaRateLimit
+  );
+  const conversacionesRateLimit = db.prepare("SELECT COUNT(*) n FROM ai_conversations WHERE tenant_id = ? AND external_user_id = ?").get(tallerA.tenantId, numeroRateLimit).n;
+  check('El uso normal (primeros mensajes) sí llegó a crear una conversación real, no bloqueó todo', conversacionesRateLimit === 1);
+
   console.log('\n=== 13) Vinculación (OTP): link -> código -> verify -> status -> unlink ===');
   const demo = await registro('taller', 'link-demo');
   tenants.push(demo);
