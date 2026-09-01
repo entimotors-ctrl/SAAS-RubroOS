@@ -31,19 +31,25 @@ function registrarVenta(tenantId, { cliente_id, tipo, items, pagado_inicial } = 
   const saldo = Math.max(total - pagado, 0);
   const estado = saldo <= 0 ? 'pagada' : 'credito_abierto';
 
-  const info = db
-    .prepare('INSERT INTO taller_ventas (tenant_id, cliente_id, tipo, total, pagado, saldo, estado) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(tenantId, cliente_id || null, esContado ? 'contado' : 'credito', total, pagado, saldo, estado);
+  // Atómico: si el INSERT de algún ítem falla, la venta tampoco queda
+  // creada — nunca una venta sin sus ítems (hallazgo de PROMPT 07/08).
+  const crear = db.transaction(() => {
+    const info = db
+      .prepare('INSERT INTO taller_ventas (tenant_id, cliente_id, tipo, total, pagado, saldo, estado) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(tenantId, cliente_id || null, esContado ? 'contado' : 'credito', total, pagado, saldo, estado);
 
-  const insertItem = db.prepare(
-    'INSERT INTO taller_venta_items (venta_id, descripcion, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)'
-  );
-  for (const it of items) {
-    const subtotal = Number(it.cantidad || 1) * Number(it.precio_unitario || 0);
-    insertItem.run(info.lastInsertRowid, it.descripcion, it.cantidad || 1, it.precio_unitario || 0, subtotal);
-  }
+    const insertItem = db.prepare(
+      'INSERT INTO taller_venta_items (venta_id, descripcion, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (const it of items) {
+      const subtotal = Number(it.cantidad || 1) * Number(it.precio_unitario || 0);
+      insertItem.run(info.lastInsertRowid, it.descripcion, it.cantidad || 1, it.precio_unitario || 0, subtotal);
+    }
+    return info.lastInsertRowid;
+  });
 
-  const venta = db.prepare('SELECT * FROM taller_ventas WHERE id = ?').get(info.lastInsertRowid);
+  const ventaId = crear();
+  const venta = db.prepare('SELECT * FROM taller_ventas WHERE id = ?').get(ventaId);
   venta.items = db.prepare('SELECT * FROM taller_venta_items WHERE venta_id = ?').all(venta.id);
   return venta;
 }

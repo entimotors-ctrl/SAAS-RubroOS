@@ -1,9 +1,9 @@
 /**
- * PROMPT 08 — pruebas de regresión para el hallazgo 2 (búsqueda de clientes
- * sensible a acentos) encontrado en la prueba real de WhatsApp de PROMPT 07.
- * No requiere el servidor HTTP corriendo: ejercita tallerService
- * directamente contra la base de datos real, mismo estilo que
- * tests/ai-core.js.
+ * PROMPT 08 — pruebas de regresión para los hallazgos 2 (búsqueda sensible a
+ * acentos) y 4 (registrarVenta sin transacción) encontrados en la prueba
+ * real de WhatsApp de PROMPT 07. No requieren el servidor HTTP corriendo:
+ * ejercitan tallerService directamente contra la base de datos real, mismo
+ * estilo que tests/ai-core.js.
  *
  * Uso: node tests/taller-hardening.js
  */
@@ -69,6 +69,61 @@ function testAcentosAislamientoTenant(tenantA, tenantB) {
   );
 }
 
+/** Fuerza que la SIGUIENTE llamada .run() de un statement que matchea `sqlSubstring` lance un error, para probar atomicidad sin dañar datos reales. Restaura db.prepare siempre. */
+function withForcedFailure(sqlSubstring, fn) {
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    const stmt = originalPrepare(sql);
+    if (sql.includes(sqlSubstring)) {
+      stmt.run = () => {
+        throw new Error('Fallo forzado de prueba (QA transacción PROMPT 08)');
+      };
+    }
+    return stmt;
+  };
+  try {
+    return fn();
+  } finally {
+    db.prepare = originalPrepare;
+  }
+}
+
+function testTransaccion(tenantId) {
+  console.log('\n=== Hallazgo 4: registrarVenta debe ser atómico ===');
+  const ventasAntes = db.prepare('SELECT COUNT(*) as n FROM taller_ventas WHERE tenant_id = ?').get(tenantId).n;
+  const itemsAntes = db
+    .prepare('SELECT COUNT(*) as n FROM taller_venta_items vi JOIN taller_ventas v ON v.id = vi.venta_id WHERE v.tenant_id = ?')
+    .get(tenantId).n;
+
+  let threw = false;
+  try {
+    withForcedFailure('INSERT INTO taller_venta_items', () => {
+      tallerService.registrarVenta(tenantId, {
+        tipo: 'contado',
+        items: [{ descripcion: 'Repuesto de prueba QA', cantidad: 1, precio_unitario: 100 }],
+      });
+    });
+  } catch {
+    threw = true;
+  }
+  check('registrarVenta lanza cuando el INSERT de ítems falla a mitad de camino', threw);
+
+  const ventasDespues = db.prepare('SELECT COUNT(*) as n FROM taller_ventas WHERE tenant_id = ?').get(tenantId).n;
+  const itemsDespues = db
+    .prepare('SELECT COUNT(*) as n FROM taller_venta_items vi JOIN taller_ventas v ON v.id = vi.venta_id WHERE v.tenant_id = ?')
+    .get(tenantId).n;
+
+  check('No quedó ninguna venta huérfana (el conteo de ventas no cambió)', ventasDespues === ventasAntes, `antes=${ventasAntes} después=${ventasDespues}`);
+  check('No quedó ningún ítem huérfano (el conteo de ítems no cambió)', itemsDespues === itemsAntes, `antes=${itemsAntes} después=${itemsDespues}`);
+
+  // Control positivo: sin fallo forzado, la venta sí se crea completa.
+  const venta = tallerService.registrarVenta(tenantId, {
+    tipo: 'contado',
+    items: [{ descripcion: 'Repuesto de control', cantidad: 2, precio_unitario: 50 }],
+  });
+  check('Control positivo: sin fallo forzado, la venta se crea con su ítem', venta.id && venta.items.length === 1 && venta.items[0].subtotal === 100);
+}
+
 function limpiar(tenants) {
   console.log('\n=== Limpieza de datos de prueba ===');
   const run = db.transaction(() => {
@@ -89,6 +144,7 @@ function main() {
   try {
     testAcentos(tenantA);
     testAcentosAislamientoTenant(tenantA, tenantB);
+    testTransaccion(tenantA);
   } finally {
     limpiar([tenantA, tenantB]);
   }
