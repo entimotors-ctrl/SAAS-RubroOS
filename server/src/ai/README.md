@@ -1,8 +1,10 @@
-# Arquitectura de IA — chat web conectado, WhatsApp todavía NO
+# Arquitectura de IA — chat web y WhatsApp, mismo AI Core
 
-El asistente de IA de RubroOS ya funciona por chat web, usando la misma
-lógica de negocio que ya usa la app web, sin duplicarla y sin saltarse el
-aislamiento multi-tenant.
+El asistente de IA de RubroOS funciona por chat web y por WhatsApp, usando
+la misma lógica de negocio en ambos casos (mismo `chatService`, mismo
+`orchestrator`, mismas tools, mismos permisos, mismo aislamiento
+multi-tenant) — WhatsApp es solo otro canal, no un segundo cerebro. Ver
+`server/src/whatsapp/README.md` para el detalle de esa integración.
 
 ```
 POST /api/ai/chat (JWT) → AiContext → chatService.handleChatMessage()
@@ -52,9 +54,10 @@ Todas requieren `requireAuth` + `requireTenant` (igual que el resto de la API) y
 
 ## Qué falta
 
-WhatsApp (`server/src/routes/whatsapp.js`) sigue inerte — es la siguiente fase: vincular número de WhatsApp a un usuario/tenant y conectar el webhook a `chatService`, reutilizando exactamente esta misma capa.
+Nada de este núcleo — WhatsApp ya está conectado (ver `server/src/whatsapp/`). Lo que sigue pendiente son cosas explícitamente fuera de alcance por ahora: mensajes de voz e imágenes por WhatsApp (fase separada).
 
 ## Pruebas
 
 - `server/tests/ai-core.js` — 23 checks del núcleo (sin HTTP ni proveedor).
-- `server/tests/ai-chat.js` — 31 checks de integración HTTP real (requiere el servidor corriendo con `AI_FAKE_PROVIDER=1`).
+- `server/tests/ai-chat.js` — 31 checks de integración HTTP real del chat web (requiere el servidor corriendo con `AI_FAKE_PROVIDER=1`).
+- `server/tests/whatsapp.js` — 46 checks de integración HTTP real de WhatsApp (requiere `AI_FAKE_PROVIDER=1 WHATSAPP_FAKE_TRANSPORT=1`, ver `server/src/whatsapp/README.md`).

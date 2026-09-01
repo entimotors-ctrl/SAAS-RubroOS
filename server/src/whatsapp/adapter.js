@@ -65,6 +65,14 @@ function clearOutbox() {
 /** Manda un mensaje de texto vía la Graph API. No sabe nada del orchestrator — solo habla el wire de Meta. */
 async function sendMessage({ to, text, phoneNumberId, accessToken }) {
   if (process.env.WHATSAPP_FAKE_TRANSPORT === '1') {
+    // Gatillo mágico SOLO para pruebas (mismo espíritu que las frases clave
+    // de FakeAIProvider): simula que la Graph API de Meta falló, para poder
+    // probar de forma determinista que un error ahí no expone nada.
+    if (to === 'FAIL_SIMULATION') {
+      const err = new Error('WhatsApp API respondió 500 (simulado)');
+      err.status = 500;
+      throw err;
+    }
     outbox.push({ to, text });
     return { messaging_product: 'whatsapp', fake: true };
   }
