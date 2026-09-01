@@ -385,6 +385,91 @@ async function runChecks() {
   });
   check('tenant_staff no puede vincular (403)', staffLinkIntento.status === 403);
 
+  console.log('\n=== 14) Hardening PROMPT 08: la cancelación/confirmación nunca la afirma el modelo ===');
+  // Número dedicado: numeroA ya mandó muchos mensajes en las secciones
+  // anteriores de este mismo archivo — reutilizarlo aquí acumularía contra
+  // el rate limiter (mismo motivo por el que 12b usa numeroRateLimit).
+  const numeroHardening = `504666${RUN}`.slice(0, 12);
+  linkIdentity(tallerA.tenantId, tallerA.userId, numeroHardening);
+  await clearOutbox();
+  await sendText(numeroHardening, 'hola'); // primer contacto: crea la conversación de este número
+  const conv14 = db.prepare("SELECT id FROM ai_conversations WHERE tenant_id = ? AND channel='whatsapp' AND external_user_id = ?").get(tallerA.tenantId, numeroHardening);
+  const crearPendiente = (toolName) =>
+    db
+      .prepare(`INSERT INTO ai_actions (conversation_id, tenant_id, tool_name, arguments, status) VALUES (?, ?, ?, '{}', 'pending_confirmation')`)
+      .run(conv14.id, tallerA.tenantId, toolName).lastInsertRowid;
+  const estadoDe = (id) => db.prepare('SELECT status FROM ai_actions WHERE id = ?').get(id).status;
+
+  // -- 1: "no" con una sola pendiente -> cancela de verdad --
+  const p1 = crearPendiente('taller.registrarVenta');
+  await clearOutbox();
+  await sendText(numeroHardening, 'no');
+  check('[14.1] "no" con 1 pendiente SÍ cancela (estado real = rejected)', estadoDe(p1) === 'rejected');
+
+  // -- 2: "sí" con una sola pendiente -> confirma de verdad --
+  const p2 = crearPendiente('taller.consultarInventario');
+  await clearOutbox();
+  await sendText(numeroHardening, 'sí');
+  check('[14.2] "sí" con 1 pendiente SÍ confirma (estado real = executed)', estadoDe(p2) === 'executed');
+
+  // -- 3: "cancelar 2" con solamente 1 pendiente -> NO cancela, NO lo afirma --
+  const p3 = crearPendiente('taller.registrarVenta');
+  await clearOutbox();
+  await sendText(numeroHardening, 'cancelar 2');
+  const resp3 = await lastReplyTo(numeroHardening);
+  check('[14.3] "cancelar 2" con solo 1 pendiente NO cancela nada (sigue pending_confirmation)', estadoDe(p3) === 'pending_confirmation');
+  check('[14.3] La respuesta es la aclaración real, no una afirmación de éxito', resp3?.includes('No hay ninguna acción pendiente con el número 2'), resp3);
+
+  // -- 4: "cancelar todo" -> explícitamente no soportado, NO cancela, NO lo afirma --
+  await clearOutbox();
+  await sendText(numeroHardening, 'cancelar todo');
+  const resp4 = await lastReplyTo(numeroHardening);
+  check('[14.4] "cancelar todo" NO cancela nada (sigue pending_confirmation)', estadoDe(p3) === 'pending_confirmation');
+  check(
+    '[14.4] La respuesta dice honestamente que no está soportado, nunca "cancelado"',
+    resp4?.toLowerCase().includes('no puedo cancelar varias') && !/cancelad[oa]s?\.?\s*$/i.test(resp4.trim()),
+    resp4
+  );
+  db.prepare("UPDATE ai_actions SET status = 'rejected' WHERE id = ?").run(p3); // limpieza manual del sobrante
+
+  // -- 7 y 8: dos pendientes -> selección válida vs. inválida --
+  // p7b usa consultarInventario (sin argumentos requeridos) para que la
+  // confirmación pueda ejecutar de verdad con los argumentos vacíos del
+  // fixture — registrarAbono fallaría por falta de ventaId, que no es lo
+  // que esta prueba quiere ejercitar.
+  const p7a = crearPendiente('taller.registrarVenta');
+  const p7b = crearPendiente('taller.consultarInventario');
+  await clearOutbox();
+  await sendText(numeroHardening, '2');
+  check('[14.7] Con 2 pendientes, "2" resuelve exactamente la #2 (consultarInventario)', estadoDe(p7b) === 'executed');
+  check('[14.7] La #1 no se tocó', estadoDe(p7a) === 'pending_confirmation');
+
+  // Un número suelto solo se trata como índice cuando hay 2+ pendientes
+  // (regla ya existente, intencional) — se necesita una segunda pendiente
+  // real para que "5" (fuera de rango) ejercite esa rama en vez de caer
+  // como mensaje suelto sin acción pendiente que resolver.
+  const p8b = crearPendiente('taller.consultarInventario');
+  await clearOutbox();
+  await sendText(numeroHardening, '5'); // quedan [p7a, p8b] -> posición 5 no existe
+  const resp8 = await lastReplyTo(numeroHardening);
+  check('[14.8] Selección fuera de rango ("5" con 2 pendientes reales) NO ejecuta nada', estadoDe(p7a) === 'pending_confirmation' && estadoDe(p8b) === 'pending_confirmation');
+  check('[14.8] La respuesta es la aclaración real, no una confirmación', resp8?.includes('No hay ninguna acción pendiente con el número 5'), resp8);
+  db.prepare("UPDATE ai_actions SET status = 'rejected' WHERE id = ?").run(p8b); // limpieza manual del sobrante
+
+  // -- 9 y 10: repetir "cancelar 2" después de haber cancelado la #2 no afecta otra acción --
+  const p10a = crearPendiente('taller.registrarVenta'); // junto con p7a (todavía pendiente), quedan 2: [p7a, p10a]
+  await clearOutbox();
+  await sendText(numeroHardening, 'cancelar 2'); // cancela la #2 de la lista actual = p10a
+  check('[14.9] "cancelar 2" cancela la acción #2 real de la lista actual (p10a)', estadoDe(p10a) === 'rejected');
+  check('[14.9] p7a (la #1) sigue intacta', estadoDe(p7a) === 'pending_confirmation');
+
+  await clearOutbox();
+  await sendText(numeroHardening, 'cancelar 2'); // ahora solo queda p7a en la posición 1 -> la #2 ya no existe
+  const resp10 = await lastReplyTo(numeroHardening);
+  check('[14.10] Repetir "cancelar 2" tras cancelar la #2 NO afecta ninguna otra acción (p7a intacta)', estadoDe(p7a) === 'pending_confirmation');
+  check('[14.10] La respuesta es la aclaración real, no una segunda cancelación inventada', resp10?.includes('No hay ninguna acción pendiente con el número 2'), resp10);
+  db.prepare("UPDATE ai_actions SET status = 'rejected' WHERE id = ?").run(p7a); // limpieza manual del sobrante
+
   return { tenants };
 }
 
