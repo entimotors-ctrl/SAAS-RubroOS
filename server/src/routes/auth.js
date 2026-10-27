@@ -39,15 +39,16 @@ function uniqueSlug(base) {
 }
 
 router.post('/registro', authLimiter, (req, res) => {
+  if(process.env.NODE_ENV==='production'&&process.env.PUBLIC_REGISTRATION!=='1')return res.status(403).json({error:'Solicita el alta al administrador de RubroOS'});
   const { business_type, empresa_nombre, nombre, email, password } = req.body || {};
   if (!BUSINESS_TYPE_IDS.includes(business_type)) {
     return res.status(400).json({ error: 'Rubro inválido' });
   }
-  if (!empresa_nombre || !nombre || !email || !password) {
+  if (![empresa_nombre,nombre,email,password].every(v=>typeof v==='string'&&v.trim()) || empresa_nombre.length>160 || nombre.length>160 || email.length>254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+  if (password.length < (process.env.NODE_ENV==='production'?12:6) || Buffer.byteLength(password,'utf8')>72) {
+    return res.status(400).json({ error: 'Contraseña inválida: mínimo 12 caracteres en producción, máximo 72 bytes' });
   }
 
   const yaExiste = db.prepare('SELECT 1 FROM users WHERE email = ? AND business_type = ?').get(email, business_type);
@@ -55,6 +56,7 @@ router.post('/registro', authLimiter, (req, res) => {
     return res.status(409).json({ error: 'Ya existe una cuenta con ese correo para este rubro' });
   }
 
+  const created=db.transaction(()=>{
   const slug = uniqueSlug(slugify(empresa_nombre));
   const tenantInsert = db.prepare(
     `INSERT INTO tenants (business_type, nombre_empresa, slug, plan, status) VALUES (?, ?, ?, 'trial', 'trial')`
@@ -68,8 +70,11 @@ router.post('/registro', authLimiter, (req, res) => {
   );
   const userResult = userInsert.run(tenantId, business_type, email, passwordHash, nombre);
 
+  return {slug,tenantId,userId:userResult.lastInsertRowid};
+  }).immediate();
+  const {slug,tenantId,userId}=created;
   const token = signToken({
-    sub: userResult.lastInsertRowid,
+    sub: userId,
     tenant_id: tenantId,
     business_type,
     role: 'tenant_admin',
@@ -79,7 +84,7 @@ router.post('/registro', authLimiter, (req, res) => {
 
   res.status(201).json({
     token,
-    user: { id: userResult.lastInsertRowid, nombre, email, role: 'tenant_admin', business_type },
+    user: { id: userId, nombre, email, role: 'tenant_admin', business_type },
     tenant: { id: tenantId, nombre_empresa: empresa_nombre, slug, business_type, plan: 'trial', status: 'trial' },
   });
 });
@@ -89,8 +94,9 @@ router.post('/login', authLimiter, (req, res) => {
   if (!BUSINESS_TYPE_IDS.includes(business_type)) {
     return res.status(400).json({ error: 'Rubro inválido' });
   }
+  if(typeof email!=='string'||typeof password!=='string')return res.status(400).json({error:'Correo y contraseña requeridos'});
   const user = db.prepare('SELECT * FROM users WHERE email = ? AND business_type = ? AND role != ?').get(email, business_type, 'owner');
-  if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
+  if (!user || user.access_status!=='activo' || !bcrypt.compareSync(password || '', user.password_hash)) {
     return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
   }
   const tenant = db.prepare('SELECT * FROM tenants WHERE id = ?').get(user.tenant_id);
@@ -116,8 +122,9 @@ router.post('/login', authLimiter, (req, res) => {
 
 router.post('/owner-login', authLimiter, (req, res) => {
   const { email, password } = req.body || {};
+  if(typeof email!=='string'||typeof password!=='string')return res.status(400).json({error:'Correo y contraseña requeridos'});
   const user = db.prepare("SELECT * FROM users WHERE email = ? AND role = 'owner'").get(email);
-  if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
+  if (!user || user.access_status!=='activo' || !bcrypt.compareSync(password || '', user.password_hash)) {
     return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
   }
   const token = signToken({ sub: user.id, role: 'owner', nombre: user.nombre, email: user.email });
@@ -132,4 +139,6 @@ router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user, tenant });
 });
 
+router.post('/change-password',authLimiter,requireAuth,(req,res)=>res.json(require('../services/passwords').change(req.user.sub,req.body?.current_password,req.body?.password)));
+router.post('/reset-password',authLimiter,(req,res)=>res.json(require('../services/passwords').reset(req.body?.token,req.body?.password)));
 module.exports = router;

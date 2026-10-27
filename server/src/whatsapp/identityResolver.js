@@ -22,8 +22,10 @@ function resolve({ phoneNumberId, from }) {
     .prepare(
       `SELECT wi.tenant_id AS tenantId, wi.user_id AS userId, u.role AS role, u.business_type AS businessType
        FROM whatsapp_identities wi
-       JOIN users u ON u.id = wi.user_id
-       WHERE wi.phone_number_id = ? AND wi.phone_number = ? AND wi.status = 'active'`
+       JOIN users u ON u.id = wi.user_id AND u.tenant_id = wi.tenant_id
+       JOIN tenants t ON t.id = wi.tenant_id AND t.business_type = u.business_type
+         AND t.status IN ('activo', 'trial')
+       WHERE u.role='tenant_admin' AND u.access_status='activo' AND wi.phone_number_id = ? AND wi.phone_number = ? AND wi.status = 'active'`
     )
     .get(phoneNumberId, phoneNumber);
 

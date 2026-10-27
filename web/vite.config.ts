@@ -8,7 +8,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: process.env.RUBROOS_API_TARGET || 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
     },

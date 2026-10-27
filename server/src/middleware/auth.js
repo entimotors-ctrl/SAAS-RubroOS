@@ -1,4 +1,6 @@
 const jwt = require('jsonwebtoken');
+const db = require('../db');
+const { activeTenant } = require('../security/access');
 
 if (!process.env.JWT_SECRET) {
   throw new Error(
@@ -9,7 +11,8 @@ if (!process.env.JWT_SECRET) {
 const JWT_SECRET = process.env.JWT_SECRET;
 
 function signToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
+  const user=db.prepare('SELECT session_version FROM users WHERE id=?').get(payload.sub);
+  return jwt.sign({...payload,sv:user?.session_version||0}, JWT_SECRET, { expiresIn: '12h' });
 }
 
 function requireAuth(req, res, next) {
@@ -17,7 +20,16 @@ function requireAuth(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'No autenticado' });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const claims = jwt.verify(token, JWT_SECRET);
+    const user = db.prepare('SELECT id, tenant_id, business_type, role, nombre, email, session_version, access_status FROM users WHERE id = ?').get(claims.sub);
+    if (!user || user.access_status!=='activo' || (claims.sv||0)!==user.session_version || (user.tenant_id || null) !== (claims.tenant_id || null)
+      || (user.business_type || null) !== (claims.business_type || null)) {
+      return res.status(401).json({ error: 'La sesión ya no es válida. Inicia sesión de nuevo.' });
+    }
+    if (user.role !== 'owner' && !activeTenant(user.tenant_id, user.business_type)) {
+      return res.status(403).json({ error: 'El negocio no está activo. Contacta al administrador.' });
+    }
+    req.user = { ...claims, role: user.role, nombre: user.nombre, email: user.email };
     next();
   } catch {
     return res.status(401).json({ error: 'Token inválido o expirado' });
@@ -32,6 +44,9 @@ function requireOwner(req, res, next) {
 function requireTenant(req, res, next) {
   if (!req.user?.tenant_id || !req.user?.business_type) {
     return res.status(403).json({ error: 'Esta cuenta no pertenece a un negocio' });
+  }
+  if (!activeTenant(req.user.tenant_id, req.user.business_type)) {
+    return res.status(403).json({ error: 'El negocio no está activo' });
   }
   next();
 }

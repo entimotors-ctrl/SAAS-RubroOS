@@ -245,4 +245,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_inbound_events (
 );
 `);
 
+require('./db/migrations').migrate(db, dbPath);
+
+require('./services/businessClock').install(db);
 module.exports = db;

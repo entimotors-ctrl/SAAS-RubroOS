@@ -20,7 +20,8 @@ router.use(
     refs: { cliente_id: 'taller_clientes', vehiculo_id: 'taller_vehiculos' },
   })
 );
-router.use('/inventario', simpleCrud('taller_inventario', ['nombre', 'sku', 'precio', 'stock'], { required: ['nombre'] }));
+router.use('/inventario', require('./tallerInventory'));
+router.use('/ordenes', require('./tallerOrders'));
 
 // ---- POS / Ventas (contado y crédito) ----
 router.get('/ventas', (req, res) => {
@@ -42,7 +43,7 @@ router.get('/ventas', (req, res) => {
 
 router.post('/ventas', (req, res, next) => {
   try {
-    const venta = tallerService.registrarVenta(req.user.tenant_id, req.body || {});
+    const venta = tallerService.registrarVenta(req.user.tenant_id, req.body || {}, req.user.sub);
     res.status(201).json(venta);
   } catch (err) {
     next(err);
@@ -61,18 +62,19 @@ router.post('/ventas/:id/abonos', (req, res, next) => {
 router.get('/finanzas/resumen', (req, res) => {
   const tenantId = req.user.tenant_id;
   const hoy = db
-    .prepare("SELECT COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND date(created_at) = date('now')")
+    .prepare("SELECT COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) = business_today(tenant_id)")
     .get(tenantId).total;
   const semana = db
-    .prepare("SELECT date(created_at) AS dia, COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND created_at >= date('now','-6 day') GROUP BY dia ORDER BY dia")
+    .prepare("SELECT business_day(created_at,tenant_id) AS dia, COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) >= date(business_today(tenant_id),'-6 day') GROUP BY dia ORDER BY dia")
     .all(tenantId);
   const creditoPendiente = db
     .prepare("SELECT COALESCE(SUM(saldo),0) AS total FROM taller_ventas WHERE tenant_id = ? AND estado = 'credito_abierto'")
     .get(tenantId).total;
   const citasHoy = db
-    .prepare("SELECT COUNT(*) AS n FROM taller_citas WHERE tenant_id = ? AND fecha = date('now')")
+    .prepare("SELECT COUNT(*) AS n FROM taller_citas WHERE tenant_id = ? AND fecha = business_today(tenant_id)")
     .get(tenantId).n;
-  res.json({ ventasHoy: hoy, ventasUltimaSemana: semana, creditoPendiente, citasHoy });
+  const vehiculosEnTaller = db.prepare("SELECT COUNT(DISTINCT vehiculo_id) AS n FROM taller_ordenes WHERE tenant_id = ? AND estado NOT IN ('entregada', 'cancelada')").get(tenantId).n;
+  res.json({ ventasHoy: hoy, ventasUltimaSemana: semana, creditoPendiente, citasHoy, vehiculosEnTaller });
 });
 
 module.exports = router;

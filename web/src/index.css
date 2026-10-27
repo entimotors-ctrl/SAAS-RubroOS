@@ -25,3 +25,11 @@ body {
   background: rgba(255, 255, 255, 0.12);
   border-radius: 999px;
 }
+
+.app-frame { background: radial-gradient(ellipse at 80% 0%, #162a3c 0%, #0b1422 36%, #080f1b 80%); }
+.surface-card { background: linear-gradient(145deg,rgba(28,43,62,.9),rgba(15,25,41,.94)); }
+button,a,input,select { -webkit-tap-highlight-color: transparent; }
+button:focus-visible,a:focus-visible { outline: 2px solid var(--rubro-accent,#34d399); outline-offset: 3px; }
+table { font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: rgba(255,255,255,.025); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

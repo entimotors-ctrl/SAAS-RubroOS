@@ -1,35 +1,37 @@
 const db = require('../db');
 const { ServiceError } = require('./errors');
 
-function registrarProduccion(tenantId, { animal_id, fecha, turno, litros } = {}) {
-  if (!animal_id || !fecha || !litros) throw new ServiceError('Faltan campos: animal_id, fecha, litros');
-  const numLitros = Number(litros);
-  if (!Number.isFinite(numLitros) || numLitros <= 0) throw new ServiceError('Litros inválidos: debe ser un número mayor que 0');
-  const animal = db.prepare('SELECT 1 FROM ganaderia_animales WHERE id = ? AND tenant_id = ?').get(animal_id, tenantId);
-  if (!animal) throw new ServiceError('El animal indicado no existe o no pertenece a tu negocio');
-
-  const info = db
-    .prepare('INSERT INTO ganaderia_produccion_leche (tenant_id, animal_id, fecha, turno, litros) VALUES (?, ?, ?, ?, ?)')
-    .run(tenantId, animal_id, fecha, turno || 'AM', numLitros);
-  return db.prepare('SELECT * FROM ganaderia_produccion_leche WHERE id = ?').get(info.lastInsertRowid);
+function registrarProduccion(tenantId, { animal_id, fecha, turno='AM', litros } = {}) {
+  return db.transaction(()=>{
+    const {date,number}=require('./validation');
+    date(fecha);
+    const n=number(litros,'Litros',0.001);
+    if(!['AM','PM'].includes(turno)) throw new ServiceError('Turno debe ser AM o PM');
+    const animal=db.prepare('SELECT * FROM ganaderia_animales WHERE id=? AND tenant_id=?').get(animal_id||null,tenantId);
+    if(!animal) throw new ServiceError('Animal no encontrado');
+    if(animal.sexo!=='hembra'||animal.estado!=='activo') throw new ServiceError('Solo se registra leche de hembras activas');
+    if(db.prepare('SELECT id FROM ganaderia_produccion_leche WHERE tenant_id=? AND animal_id=? AND fecha=? AND turno=?').get(tenantId,animal.id,fecha,turno)) throw new ServiceError('Ya existe un ordeño de este animal en esa fecha y turno',409);
+    const id=db.prepare('INSERT INTO ganaderia_produccion_leche(tenant_id,animal_id,fecha,turno,litros) VALUES(?,?,?,?,?)').run(tenantId,animal.id,fecha,turno,n).lastInsertRowid;
+    return db.prepare('SELECT * FROM ganaderia_produccion_leche WHERE id=?').get(id);
+  }).immediate();
 }
 
 // ---- Lecturas (reutilizadas por la API REST y por las tools de IA) ----
 
 function resumenProduccion(tenantId) {
   const hoy = db
-    .prepare("SELECT COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche WHERE tenant_id = ? AND fecha = date('now')")
+    .prepare("SELECT COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche WHERE tenant_id = ? AND fecha = business_today(tenant_id)")
     .get(tenantId).litros;
   const semana = db
     .prepare(
       `SELECT fecha, COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche
-       WHERE tenant_id = ? AND fecha >= date('now','-6 day') GROUP BY fecha ORDER BY fecha`
+       WHERE tenant_id = ? AND fecha >= date(business_today(tenant_id),'-6 day') GROUP BY fecha ORDER BY fecha`
     )
     .all(tenantId);
   const porAnimal = db
     .prepare(
       `SELECT a.arete, a.nombre, COALESCE(SUM(p.litros),0) AS litros FROM ganaderia_animales a
-       LEFT JOIN ganaderia_produccion_leche p ON p.animal_id = a.id AND p.tenant_id = a.tenant_id AND p.fecha >= date('now','-6 day')
+       LEFT JOIN ganaderia_produccion_leche p ON p.animal_id = a.id AND p.tenant_id = a.tenant_id AND p.fecha >= date(business_today(a.tenant_id),'-6 day')
        WHERE a.tenant_id = ? GROUP BY a.id ORDER BY litros DESC`
     )
     .all(tenantId);

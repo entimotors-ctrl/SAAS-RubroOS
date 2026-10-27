@@ -8,8 +8,7 @@
  *
  * Política:
  *   tenant_admin — todos los permisos de las tools de su rubro (read, write, destructive).
- *   tenant_staff — read y write, NUNCA destructive (cancelar, eliminar, modificar
- *                  información crítica queda reservado al admin del negocio).
+ *   tenant_staff — solo su portal de tareas/citas; sin herramientas generales de IA.
  *   cualquier otro rol (p. ej. owner, que no tiene tenant/rubro propio) — ninguno;
  *                  las tools de rubro no aplican a esa cuenta.
  *
@@ -18,7 +17,7 @@
  */
 const ROLE_ALLOWED_RISK_LEVELS = {
   tenant_admin: ['read', 'write', 'destructive'],
-  tenant_staff: ['read', 'write'],
+  tenant_staff: [],
 };
 
 function permissionsForRole(role, businessType) {

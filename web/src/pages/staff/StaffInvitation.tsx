@@ -1,0 +1,13 @@
+import {useEffect,useState} from 'react';
+import {Link,useNavigate} from 'react-router-dom';
+import {useAuth} from '../../lib/use-auth';
+import {apiPost} from '../../lib/api';
+import {Button,Card,Field,Input} from '../../components/ui';
+interface Invitation{nombre:string;negocio:string;business_type:string;expires_at:number}
+export default function StaffInvitation(){
+ const [token]=useState(()=>new URLSearchParams(window.location.hash.slice(1)).get('token')||'');
+ const [info,setInfo]=useState<Invitation|null>(null),[error,setError]=useState(''),[password,setPassword]=useState(''),[confirm,setConfirm]=useState(''),[busy,setBusy]=useState(false);
+ const {activateStaff}=useAuth(),navigate=useNavigate();
+ useEffect(()=>{let alive=true;void apiPost<Invitation>('/staff-public/invitation',{token}).then(r=>{if(alive)setInfo(r);}).catch(()=>{if(alive)setError('El enlace venció, ya se usó o fue retirado. Pide una nueva invitación a tu administrador.');});return()=>{alive=false;};},[token]);
+ return <div className="app-frame flex min-h-screen items-center justify-center p-5 text-white"><Card className="w-full max-w-lg space-y-5 p-7"><p className="text-xs uppercase tracking-[.2em] text-emerald-300">RubroOS / Acceso del equipo</p><h1 className="text-3xl font-bold">Tu espacio de trabajo</h1>{info&&<><p className="text-slate-300">Hola, {info.nombre}. Te invitaron a <strong>{info.negocio}</strong>.</p><form className="space-y-4" onSubmit={async e=>{e.preventDefault();if(busy)return;if(password!==confirm){setError('Las contraseñas no coinciden');return;}setBusy(true);try{await activateStaff(token,password);window.history.replaceState(null,'',window.location.pathname);navigate(info.business_type==='barberia'?'/agenda-trabajo':'/colaborador',{replace:true});}catch(e){setError(e instanceof Error?e.message:'No se pudo activar');}finally{setBusy(false);}}}><Field label="Crea tu contraseña"><Input required type="password" minLength={12} maxLength={72} autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)}/></Field><p className="text-xs text-slate-400">Usa al menos 12 caracteres. Tu administrador no necesita conocerla.</p><Field label="Repite tu contraseña"><Input required type="password" autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)}/></Field><Button type="submit" disabled={busy} className="w-full py-3">{busy?'Activando…':'Activar mi acceso'}</Button></form></>}{error&&<p role="alert" className="text-red-300">{error}</p>}{!info&&!error&&<p>Comprobando invitación…</p>}<Link to="/elegir-sistema" className="block text-sm text-emerald-300">Ya tengo cuenta: iniciar sesión</Link></Card></div>;
+}

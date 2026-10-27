@@ -1,4 +1,5 @@
 const db = require('../db');
+const { money } = require('./validation');
 const { ServiceError } = require('./errors');
 
 function crearTurno(tenantId, { cliente_id, vehiculo_id, servicio_id, usa_membresia } = {}) {
@@ -7,18 +8,21 @@ function crearTurno(tenantId, { cliente_id, vehiculo_id, servicio_id, usa_membre
     if (!cliente) throw new ServiceError('El cliente indicado no existe o no pertenece a tu negocio');
   }
   if (vehiculo_id) {
-    const vehiculo = db.prepare('SELECT 1 FROM carwash_vehiculos WHERE id = ? AND tenant_id = ?').get(vehiculo_id, tenantId);
+    const vehiculo = db.prepare('SELECT * FROM carwash_vehiculos WHERE id = ? AND tenant_id = ?').get(vehiculo_id, tenantId);
+    if (vehiculo && Number(vehiculo.cliente_id) !== Number(cliente_id)) throw new ServiceError('El vehículo no pertenece al cliente seleccionado');
     if (!vehiculo) throw new ServiceError('El vehículo indicado no existe o no pertenece a tu negocio');
   }
   const servicio = servicio_id ? db.prepare('SELECT * FROM carwash_servicios WHERE id = ? AND tenant_id = ?').get(servicio_id, tenantId) : null;
-  if (servicio_id && !servicio) throw new ServiceError('El servicio indicado no existe o no pertenece a tu negocio');
+  if (!servicio) throw new ServiceError('El servicio indicado no existe o no pertenece a tu negocio');
 
   let precio = servicio ? servicio.precio : 0;
   let usaMembresiaFinal = 0;
+  if (usa_membresia && !cliente_id) throw new ServiceError('Selecciona el cliente de la membresía');
   if (usa_membresia && cliente_id) {
     const membresia = db
-      .prepare("SELECT * FROM carwash_membresias WHERE cliente_id = ? AND tenant_id = ? AND estado = 'activa' AND fecha_renovacion >= date('now')")
+      .prepare("SELECT * FROM carwash_membresias WHERE cliente_id = ? AND tenant_id = ? AND estado = 'activa' AND fecha_renovacion >= business_today(tenant_id)")
       .get(cliente_id, tenantId);
+    if (!membresia) throw new ServiceError('El cliente no tiene una membresía vigente');
     if (membresia) {
       precio = 0;
       usaMembresiaFinal = 1;
@@ -34,12 +38,18 @@ function crearTurno(tenantId, { cliente_id, vehiculo_id, servicio_id, usa_membre
   return db.prepare('SELECT * FROM carwash_turnos WHERE id = ?').get(info.lastInsertRowid);
 }
 
-function actualizarEstadoTurno(tenantId, turnoId, estado) {
-  const turno = db.prepare('SELECT * FROM carwash_turnos WHERE id = ? AND tenant_id = ?').get(turnoId, tenantId);
-  if (!turno) throw new ServiceError('Turno no encontrado', 404);
-  if (!['en_cola', 'lavando', 'listo', 'entregado'].includes(estado)) throw new ServiceError('Estado inválido');
-  db.prepare('UPDATE carwash_turnos SET estado = ? WHERE id = ?').run(estado, turno.id);
-  return db.prepare('SELECT * FROM carwash_turnos WHERE id = ?').get(turno.id);
+function actualizarEstadoTurno(tenantId, turnoId, estado, metodo_pago='efectivo') {
+  return db.transaction(()=>{
+    const turno=db.prepare('SELECT * FROM carwash_turnos WHERE id=? AND tenant_id=?').get(turnoId,tenantId);
+    if(!turno) throw new ServiceError('Turno no encontrado',404);
+    const states=['en_cola','lavando','listo','entregado'];
+    if(!states.includes(estado)) throw new ServiceError('Estado inválido');
+    if(turno.estado===estado) return turno;
+    if(states.indexOf(estado)!==states.indexOf(turno.estado)+1) throw new ServiceError('Avanza el lavado en orden: cola, lavando, listo y entrega',409);
+    if(estado==='entregado' && !['efectivo','tarjeta','transferencia'].includes(metodo_pago)) throw new ServiceError('Método de pago inválido');
+    db.prepare("UPDATE carwash_turnos SET estado=?, entregado_at=CASE WHEN ?='entregado' THEN datetime('now') ELSE entregado_at END, metodo_pago=CASE WHEN ?='entregado' THEN ? ELSE metodo_pago END WHERE id=?").run(estado,estado,estado,turno.usa_membresia?'membresia':metodo_pago,turno.id);
+    return db.prepare('SELECT * FROM carwash_turnos WHERE id=?').get(turno.id);
+  }).immediate();
 }
 
 function crearMembresia(tenantId, { cliente_id, plan, precio_mensual } = {}) {
@@ -50,16 +60,16 @@ function crearMembresia(tenantId, { cliente_id, plan, precio_mensual } = {}) {
   const info = db
     .prepare(
       `INSERT INTO carwash_membresias (tenant_id, cliente_id, plan, precio_mensual, fecha_inicio, fecha_renovacion, estado)
-       VALUES (?, ?, ?, ?, date('now'), date('now', '+1 month'), 'activa')`
+       VALUES (?, ?, ?, ?, business_today(?), date(business_today(?), '+1 month'), 'activa')`
     )
-    .run(tenantId, cliente_id, plan, Number(precio_mensual || 0));
+    .run(tenantId, cliente_id, plan, money(precio_mensual ?? 0, 'Precio mensual') / 100,tenantId,tenantId);
   return db.prepare('SELECT * FROM carwash_membresias WHERE id = ?').get(info.lastInsertRowid);
 }
 
 function renovarMembresia(tenantId, membresiaId) {
   const m = db.prepare('SELECT * FROM carwash_membresias WHERE id = ? AND tenant_id = ?').get(membresiaId, tenantId);
   if (!m) throw new ServiceError('No encontrada', 404);
-  db.prepare("UPDATE carwash_membresias SET fecha_renovacion = date(fecha_renovacion, '+1 month'), estado = 'activa' WHERE id = ?").run(m.id);
+  db.prepare("UPDATE carwash_membresias SET fecha_renovacion = date(MAX(fecha_renovacion,business_today(tenant_id)), '+1 month'), estado = 'activa' WHERE id = ?").run(m.id);
   return db.prepare('SELECT * FROM carwash_membresias WHERE id = ?').get(m.id);
 }
 

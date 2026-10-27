@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { getBusinessType, type BusinessTypeId } from '../../lib/business-types';
-import { useAuth } from '../../lib/auth-context';
+import { useAuth } from '../../lib/use-auth';
 import { ApiError } from '../../lib/api';
 import { Button, Card, Field, Input } from '../../components/ui';
 

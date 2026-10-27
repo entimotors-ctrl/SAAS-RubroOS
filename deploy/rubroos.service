@@ -1,0 +1,22 @@
+[Unit]
+Description=RubroOS API y web
+After=network.target
+[Service]
+Type=simple
+User=rubroos
+Group=rubroos
+WorkingDirectory=/opt/rubroos/server
+EnvironmentFile=/etc/rubroos/production.env
+Environment=SKIP_ENV_FILE=1
+ExecStart=/usr/bin/node /opt/rubroos/server/src/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rubroos
+[Install]
+WantedBy=multi-user.target

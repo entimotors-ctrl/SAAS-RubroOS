@@ -1,0 +1,20 @@
+# Plantilla: sustituir dominio y rutas de certificados antes de activar.
+server {
+    listen 443 ssl;
+    server_name rubroos.example.com;
+    ssl_certificate /etc/letsencrypt/live/rubroos.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rubroos.example.com/privkey.pem;
+    client_max_body_size 1m;
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+}
+server {
+    listen 80;
+    server_name rubroos.example.com;
+    return 301 https://$host$request_uri;
+}

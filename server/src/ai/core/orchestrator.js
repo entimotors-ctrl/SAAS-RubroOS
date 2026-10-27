@@ -1,5 +1,6 @@
 const { getTool, authorize, runTool } = require('./toolRegistry');
 const history = require('./history');
+const db = require('../../db');
 
 const PENDING_ACTION_TTL_MS = 15 * 60 * 1000; // 15 minutos
 
@@ -81,7 +82,7 @@ function proposeToolCall({ conversationId, context, toolName, args, idempotencyK
  * quedaron guardados en ai_actions al proponerla — el parámetro `args` de
  * quien llama a proposeToolCall() no puede reaparecer aquí con otro valor.
  */
-function confirmToolCall({ actionId, context }) {
+function confirmInTransaction({ actionId, context }) {
   const action = history.getAction(actionId, context.tenantId);
   if (!action) return { success: false, code: 'ACTION_NOT_FOUND', message: 'Acción no encontrada para este tenant' };
   if (action.status !== 'pending_confirmation') {
@@ -96,6 +97,11 @@ function confirmToolCall({ actionId, context }) {
   const result = runTool(action.tool_name, context, storedArgs);
   history.updateActionStatus(action.id, context.tenantId, result.success ? 'executed' : 'failed', result);
   return { ...result, actionId: action.id };
+}
+
+function confirmToolCall(args) {
+  // Business writes and the authoritative action result commit together.
+  return db.transaction(() => confirmInTransaction(args)).immediate();
 }
 
 function rejectToolCall({ actionId, context }) {

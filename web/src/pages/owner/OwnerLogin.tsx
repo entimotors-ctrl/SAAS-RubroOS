@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../lib/auth-context';
+import { useAuth } from '../../lib/use-auth';
 import { ApiError } from '../../lib/api';
 import { Button, Card, Field, Input } from '../../components/ui';
 import { LogoBadge } from '../../components/Logo';
@@ -8,7 +8,7 @@ import { LogoBadge } from '../../components/Logo';
 export default function OwnerLogin() {
   const { ownerLogin } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(import.meta.env.VITE_LOCAL_DEMO==='1'?'admin@rubroos.test':'');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -42,6 +42,7 @@ export default function OwnerLogin() {
             {error && <p className="text-xs text-red-400">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</Button>
           </form>
+        {import.meta.env.VITE_LOCAL_DEMO==='1'&&<p className="mt-4 text-xs text-slate-400">Pruebas locales: admin@rubroos.test / AdminPruebas2026!</p>}
         </Card>
         <p className="mt-5 text-center text-xs">
           <Link to="/" className="text-slate-500 hover:text-slate-300">← Volver al inicio</Link>

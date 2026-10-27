@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Beef, Dna, LayoutDashboard, Mars, Milk, Syringe, Venus } from 'lucide-react';
 import { DashboardShell, type NavItem } from '../../../components/DashboardShell';
 import { getBusinessType } from '../../../lib/business-types';
-import { apiGet, apiPost } from '../../../lib/api';
+import { apiGet, apiPost, apiPut } from '../../../lib/api';
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, StatCard, Table } from '../../../components/ui';
 import { formatDate } from '../../../lib/currency';
+import { useAuth } from '../../../lib/use-auth';
 import { showToast } from '../../../lib/toast';
 
 const business = getBusinessType('ganaderia')!;
@@ -18,7 +19,7 @@ const NAV: NavItem[] = [
 ];
 
 interface Animal { id: number; arete: string; nombre?: string; raza?: string; sexo: string; fecha_nacimiento?: string; peso_kg?: number; estado: string; madre_arete?: string; padre_arete?: string }
-interface Produccion { id: number; animal_id: number; arete: string; animal_nombre?: string; fecha: string; turno: string; litros: number }
+interface Produccion { version: number; id: number; animal_id: number; arete: string; animal_nombre?: string; fecha: string; turno: string; litros: number }
 interface ResumenProduccion { litrosHoy: number; ultimaSemana: { fecha: string; litros: number }[]; porAnimal: { arete: string; nombre?: string; litros: number }[]; totalAnimales: number }
 interface Sanidad { id: number; animal_id: number; tipo: string; nombre: string; fecha: string; proxima_fecha?: string; notas?: string }
 interface Alerta { id: number; arete: string; animal_nombre?: string; nombre: string; proxima_fecha: string }
@@ -191,13 +192,13 @@ function Produccion({ produccion, animales, onCreated }: { produccion: Produccio
     <div>
       <PageHeader title="Producción de leche" subtitle="Registro por ordeño, AM y PM." action={<Button onClick={() => setOpen(true)}>+ Registrar ordeño</Button>} />
       {produccion.length === 0 ? <EmptyState message="Aún no hay registros de producción." actionLabel="+ Registrar el primero" onAction={() => setOpen(true)} /> : (
-        <Table head={['Fecha', 'Turno', 'Animal', 'Litros']}>
+        <Table head={['Fecha', 'Turno', 'Animal', 'Litros', 'Corrección']}>
           {produccion.map((p) => (
             <tr key={p.id}>
               <td className="px-4 py-2.5">{formatDate(p.fecha)}</td>
               <td className="px-4 py-2.5"><Badge>{p.turno}</Badge></td>
               <td className="px-4 py-2.5">{p.arete} {p.animal_nombre}</td>
-              <td className="px-4 py-2.5 font-semibold text-white">{p.litros} L</td>
+              <td className="px-4 py-2.5 font-semibold text-white">{p.litros} L</td><td className="px-4 py-2.5"><MilkCorrection row={p} onChanged={onCreated}/></td>
             </tr>
           ))}
         </Table>
@@ -334,4 +335,11 @@ function Reproduccion({ reproduccion, animales, nombreAnimal, onCreated }: { rep
       </Modal>
     </div>
   );
+}
+
+function MilkCorrection({row,onChanged}:{row:Produccion;onChanged:()=>void}){
+ const {user}=useAuth();const [open,setOpen]=useState(false);const [fecha,setFecha]=useState(row.fecha);const [turno,setTurno]=useState(row.turno);const [litros,setLitros]=useState(String(row.litros));const [motivo,setMotivo]=useState('');const [busy,setBusy]=useState(false);
+ const save=async()=>{setBusy(true);try{await apiPut(`/ganaderia/produccion/${row.id}`,{fecha,turno,litros:Number(litros),motivo,version:row.version});setOpen(false);onChanged();}catch{/* API displays error */}finally{setBusy(false);}};
+ if(user?.role!=='tenant_admin')return null;
+ return <><Button variant="ghost" onClick={()=>{setFecha(row.fecha);setTurno(row.turno);setLitros(String(row.litros));setMotivo('');setOpen(true);}}>Corregir</Button><Modal open={open} onClose={()=>!busy&&setOpen(false)} title="Corregir registro de ordeño"><div className="space-y-3"><p className="text-sm text-slate-400">{row.arete} · El historial conservará los valores anteriores y el motivo.</p><Field label="Fecha"><Input type="date" value={fecha} onChange={e=>setFecha(e.target.value)}/></Field><Field label="Turno"><Select value={turno} onChange={e=>setTurno(e.target.value)}><option>AM</option><option>PM</option></Select></Field><Field label="Litros"><Input type="number" min="0.001" step="0.001" value={litros} onChange={e=>setLitros(e.target.value)}/></Field><Field label="Motivo"><Input value={motivo} maxLength={500} onChange={e=>setMotivo(e.target.value)}/></Field><Button disabled={busy||motivo.trim().length<5} onClick={save}>{busy?'Guardando…':'Guardar corrección'}</Button></div></Modal></>;
 }

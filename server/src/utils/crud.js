@@ -1,5 +1,7 @@
 const express = require('express');
 const db = require('../db');
+const { requireAdmin } = require('../security/access');
+const { validateRecord } = require('./recordValidation');
 
 /**
  * Genera un router REST simple (list/create/update/delete) para una tabla
@@ -24,8 +26,7 @@ function listRows(table, tenantId, orderBy = 'id DESC') {
 
 function simpleCrud(table, fields, { orderBy = 'id DESC', required = [], refs = {} } = {}) {
   const router = express.Router();
-  const cols = fields.join(', ');
-  const placeholders = fields.map(() => '?').join(', ');
+
 
   function findMissingField(body, existing) {
     for (const field of required) {
@@ -55,9 +56,14 @@ function simpleCrud(table, fields, { orderBy = 'id DESC', required = [], refs = 
     const invalidRef = findInvalidRef(req.body, req.user.tenant_id);
     if (invalidRef) return res.status(400).json({ error: `El campo "${invalidRef}" no existe o no pertenece a tu negocio` });
 
-    const values = fields.map((f) => (req.body?.[f] ?? null));
+    const issue = validateRecord(table, req.body || {});
+    if (issue) return res.status(400).json({ error: issue });
+    const supplied = fields.filter(f => req.body?.[f] !== undefined);
+    const cols = supplied.join(', ');
+    const placeholders = supplied.map(() => '?').join(', ');
+    const values = supplied.map(f => req.body[f]);
     const info = db
-      .prepare(`INSERT INTO ${table} (tenant_id, ${cols}) VALUES (?, ${placeholders})`)
+      .prepare(`INSERT INTO ${table} (tenant_id${cols ? ", " + cols : ""}) VALUES (?${placeholders ? ", " + placeholders : ""})`)
       .run(req.user.tenant_id, ...values);
     const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(info.lastInsertRowid);
     res.status(201).json(row);
@@ -72,6 +78,8 @@ function simpleCrud(table, fields, { orderBy = 'id DESC', required = [], refs = 
     const invalidRef = findInvalidRef(req.body, req.user.tenant_id);
     if (invalidRef) return res.status(400).json({ error: `El campo "${invalidRef}" no existe o no pertenece a tu negocio` });
 
+    const issue = validateRecord(table, { ...existing, ...req.body });
+    if (issue) return res.status(400).json({ error: issue });
     const setClause = fields.map((f) => `${f} = ?`).join(', ');
     const values = fields.map((f) => (req.body?.[f] ?? existing[f]));
     db.prepare(`UPDATE ${table} SET ${setClause} WHERE id = ? AND tenant_id = ?`).run(...values, req.params.id, req.user.tenant_id);
@@ -79,7 +87,11 @@ function simpleCrud(table, fields, { orderBy = 'id DESC', required = [], refs = 
     res.json(row);
   });
 
-  router.delete('/:id', (req, res) => {
+  router.delete('/:id', requireAdmin, (req, res) => {
+    const orderRef = { taller_clientes: 'cliente_id', taller_vehiculos: 'vehiculo_id' }[table];
+    if (orderRef && db.prepare(`SELECT id FROM taller_ordenes WHERE tenant_id = ? AND ${orderRef} = ? LIMIT 1`).get(req.user.tenant_id, req.params.id)) {
+      return res.status(409).json({ error: 'Este registro tiene órdenes de reparación. Conserva su historial.' });
+    }
     const info = db.prepare(`DELETE FROM ${table} WHERE id = ? AND tenant_id = ?`).run(req.params.id, req.user.tenant_id);
     if (info.changes === 0) return res.status(404).json({ error: 'No encontrado' });
     res.status(204).end();

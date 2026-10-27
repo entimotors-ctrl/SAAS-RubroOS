@@ -1,0 +1,38 @@
+const assert = require('node:assert/strict');
+const db = require('../src/db');
+const { signToken } = require('../src/middleware/auth');
+const base = process.env.API_URL;
+if (!base || process.env.NODE_ENV !== 'test') throw new Error('Run through npm test');
+const tenant = db.prepare("SELECT * FROM tenants WHERE business_type='taller' LIMIT 1").get();
+const admin = db.prepare("SELECT * FROM users WHERE tenant_id=? AND role='tenant_admin' LIMIT 1").get(tenant.id);
+const staffId = db.prepare("INSERT INTO users(tenant_id,business_type,email,password_hash,nombre,role) VALUES (?,'taller','staff-release@test','x','QA','tenant_staff')").run(tenant.id).lastInsertRowid;
+const token = role => signToken({sub:role==='admin'?admin.id:staffId,tenant_id:tenant.id,business_type:'taller',role:role==='admin'?'tenant_admin':'tenant_staff'});
+const adminToken=token('admin'), staffToken=token('staff');
+const headers=t=>({'Content-Type':'application/json',Authorization:'Bearer '+t});
+async function req(path,method,t,body){const r=await fetch(base+path,{method,headers:headers(t),body:body?JSON.stringify(body):undefined});return {status:r.status,body:r.status===204?null:await r.json()};}
+(async()=>{
+ let checks=0;
+ const check=(actual,expected)=>{assert.equal(actual,expected);checks++;};
+ const created=await req('/taller/clientes','POST',adminToken,{nombre:'Release customer'});check(created.status,201);
+ check((await req('/taller/clientes/'+created.body.id,'DELETE',staffToken)).status,403);
+ check((await req('/taller/inventario','POST',staffToken,{nombre:'Forbidden',precio:1,stock:2})).status,403);
+ const product=await req('/taller/inventario','POST',adminToken,{nombre:'Release product',precio:10,stock:5});check(product.status,201);
+ check((await req('/taller/inventario/'+product.body.id,'PUT',adminToken,{stock:4})).status,400);
+ check((await req('/taller/inventario/'+product.body.id,'PUT',adminToken,{stock:4,motivo:'Conteo físico'})).status,200);
+ const movements=await req('/taller/inventario/'+product.body.id+'/movimientos','GET',adminToken);check(movements.body.length,2);
+ const car=await req('/taller/vehiculos','POST',adminToken,{cliente_id:created.body.id,placa:'QA-RELEASE'});check(car.status,201);
+ const order=await req('/taller/ordenes','POST',adminToken,{cliente_id:created.body.id,vehiculo_id:car.body.id,motivo:'QA'});check(order.status,201);
+ check((await req('/taller/clientes/'+created.body.id,'DELETE',adminToken)).status,409);
+ check((await req('/taller/vehiculos/'+car.body.id,'DELETE',adminToken)).status,409);
+ const count=db.prepare('SELECT COUNT(*) AS n FROM taller_ventas').get().n;
+ const saleBody={request_key:'release-http-0001',items:[{producto_id:product.body.id,descripcion:'Release product',cantidad:1,precio_unitario:10}]};
+ const sale=await req('/taller/ventas','POST',adminToken,saleBody);check(sale.status,201);
+ const retry=await req('/taller/ventas','POST',adminToken,saleBody);check(retry.body.id,sale.body.id);
+ check(db.prepare('SELECT COUNT(*) AS n FROM taller_ventas').get().n,count+1);
+ db.prepare("UPDATE tenants SET status='suspendido' WHERE id=?").run(tenant.id);
+ check((await req('/taller/clientes','GET',adminToken)).status,403);
+ check((await req('/ai/chat','POST',adminToken,{message:'hola'})).status,403);
+ db.prepare("UPDATE tenants SET status='activo' WHERE id=?").run(tenant.id);
+ check((await req('/taller/clientes','GET',adminToken)).status,200);
+ console.log(`${checks}/${checks} checks OK`);
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.close());

@@ -142,8 +142,8 @@ async function main() {
   const staffConvId = rStaffConv.body?.conversationId;
   const membresiaAntes = db.prepare('SELECT estado FROM carwash_membresias WHERE id = ?').get(membresiaCarwash).estado;
   const rStaffCancel = await api('/ai/chat', { method: 'POST', token: staffToken, body: { conversationId: staffConvId, message: 'cancela la membresia' } });
-  check('El chat responde (no crashea) cuando el rol no tiene permiso', rStaffCancel.status === 200);
-  check('La respuesta refleja PERMISSION_DENIED, no una ejecución silenciosa', rStaffCancel.body?.message?.includes('PERMISSION_DENIED'), rStaffCancel.body?.message);
+  check('El chat rechaza el acceso del colaborador', rStaffCancel.status === 403);
+  check('No se crea una conversación para el colaborador', rStaffConv.status === 403 && !staffConvId);
   const membresiaDespues = db.prepare('SELECT estado FROM carwash_membresias WHERE id = ?').get(membresiaCarwash).estado;
   check('La membresía NO fue cancelada de verdad', membresiaDespues === membresiaAntes && membresiaAntes === 'activa');
 

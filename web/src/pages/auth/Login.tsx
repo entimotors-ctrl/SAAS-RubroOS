@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { getBusinessType, type BusinessTypeId } from '../../lib/business-types';
-import { useAuth } from '../../lib/auth-context';
+import { useAuth } from '../../lib/use-auth';
 import { ApiError } from '../../lib/api';
 import { Button, Card, Field, Input } from '../../components/ui';
 
@@ -11,7 +11,7 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(import.meta.env.VITE_LOCAL_DEMO==='1'?'maestro@rubroos.test':'');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,7 +56,7 @@ export default function Login() {
               {loading ? 'Entrando…' : 'Iniciar sesión'}
             </Button>
           </form>
-          <p className="mt-3 text-center text-[11px] text-slate-500">Demo: demo@{business.id}.test / demo1234</p>
+          {(import.meta.env.DEV || import.meta.env.VITE_LOCAL_DEMO==='1') && <p className="mt-3 text-center text-[11px] text-slate-500">Maestro de pruebas: maestro@rubroos.test / Maestro2026!</p>}
         </Card>
 
         <p className="mt-5 text-center text-xs text-slate-500">

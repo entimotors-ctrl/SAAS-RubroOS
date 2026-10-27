@@ -68,4 +68,7 @@ router.post('/cotizaciones-cerca', (req, res, next) => {
   }
 });
 
+const {requireAdmin}=require('../security/access');
+router.post('/pedidos/:id/cobrar',requireAdmin,(req,res)=>res.json(require('../services/agroPayments').collect(req.user.tenant_id,req.params.id,req.body?.metodo_pago,req.user.sub)));
+router.post('/pedidos/:id/devolver',requireAdmin,(req,res)=>res.json(require('../services/agroPayments').refund(req.user.tenant_id,req.params.id,req.body?.motivo,req.user.sub)));
 module.exports = router;

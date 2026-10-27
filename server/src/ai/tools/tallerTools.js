@@ -2,7 +2,7 @@ const { registerTool } = require('../core/toolRegistry');
 const tallerService = require('../../services/tallerService');
 
 registerTool('taller.registrarVenta', {
-  description: 'Registra una venta de contado o crédito en el taller',
+  description: 'Registra una venta de contado o crédito. Para repuestos, consulta inventario y usa su producto_id exacto para descontar stock; los servicios no llevan producto_id',
   businessTypes: ['taller'],
   permission: 'taller.ventas.create',
   riskLevel: 'write',
@@ -16,13 +16,14 @@ registerTool('taller.registrarVenta', {
       required: true,
       minLength: 1,
       itemSchema: {
+        producto_id: { type: 'integer', min: 1 },
         descripcion: { type: 'string', required: true },
         cantidad: { type: 'number', min: 0.01 },
         precio_unitario: { type: 'number', min: 0 },
       },
     },
   },
-  handler: (context, args) => tallerService.registrarVenta(context.tenantId, args),
+  handler: (context, args) => tallerService.registrarVenta(context.tenantId, args, context.userId),
 });
 
 registerTool('taller.registrarAbono', {

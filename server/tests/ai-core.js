@@ -73,6 +73,7 @@ function limpiar({ tallerA, tallerB, carwashA, agroA }) {
     db.prepare('DELETE FROM taller_clientes WHERE tenant_id IN (?, ?)').run(tallerA, tallerB);
     db.prepare('DELETE FROM carwash_membresias WHERE tenant_id = ?').run(carwashA);
     db.prepare('DELETE FROM carwash_clientes WHERE tenant_id = ?').run(carwashA);
+    db.prepare('DELETE FROM users WHERE tenant_id IN (?, ?, ?, ?)').run(tallerA, tallerB, carwashA, agroA);
     db.prepare('DELETE FROM tenants WHERE id IN (?, ?, ?, ?)').run(tallerA, tallerB, carwashA, agroA);
   });
   run();
@@ -90,16 +91,21 @@ function runChecks({ tallerA, tallerB, carwashA, agroA }) {
     )
     .run(carwashA, clienteCarA).lastInsertRowid;
 
-  const ctxAdminA = buildContext({ userId: 1, tenantId: tallerA, businessType: 'taller', role: 'tenant_admin', channel: 'web' });
-  const ctxStaffA = buildContext({ userId: 2, tenantId: tallerA, businessType: 'taller', role: 'tenant_staff', channel: 'web' });
-  const ctxAdminB = buildContext({ userId: 3, tenantId: tallerB, businessType: 'taller', role: 'tenant_admin', channel: 'web' });
-  const ctxCarwashAdminA = buildContext({ userId: 4, tenantId: carwashA, businessType: 'carwash', role: 'tenant_admin', channel: 'web' });
-  const ctxCarwashStaffA = buildContext({ userId: 5, tenantId: carwashA, businessType: 'carwash', role: 'tenant_staff', channel: 'web' });
-  const ctxAgroAdminA = buildContext({ userId: 6, tenantId: agroA, businessType: 'agro', role: 'tenant_admin', channel: 'web' });
+  const fixtureUser = (tenantId, businessType, role) => db.prepare('INSERT INTO users (tenant_id,business_type,email,password_hash,nombre,role) VALUES (?,?,?,?,?,?)').run(tenantId,businessType,`core-${tenantId}-${role}@test.local`,'x','QA',role).lastInsertRowid;
+  const userIds = [null,
+    fixtureUser(tallerA, 'taller', 'tenant_admin'), fixtureUser(tallerA, 'taller', 'tenant_staff'),
+    fixtureUser(tallerB, 'taller', 'tenant_admin'), fixtureUser(carwashA, 'carwash', 'tenant_admin'),
+    fixtureUser(carwashA, 'carwash', 'tenant_staff'), fixtureUser(agroA, 'agro', 'tenant_admin')];
+  const ctxAdminA = buildContext({ userId: userIds[1], tenantId: tallerA, businessType: 'taller', role: 'tenant_admin', channel: 'web' });
+  const ctxStaffA = buildContext({ userId: userIds[2], tenantId: tallerA, businessType: 'taller', role: 'tenant_staff', channel: 'web' });
+  const ctxAdminB = buildContext({ userId: userIds[3], tenantId: tallerB, businessType: 'taller', role: 'tenant_admin', channel: 'web' });
+  const ctxCarwashAdminA = buildContext({ userId: userIds[4], tenantId: carwashA, businessType: 'carwash', role: 'tenant_admin', channel: 'web' });
+  const ctxCarwashStaffA = buildContext({ userId: userIds[5], tenantId: carwashA, businessType: 'carwash', role: 'tenant_staff', channel: 'web' });
+  const ctxAgroAdminA = buildContext({ userId: userIds[6], tenantId: agroA, businessType: 'agro', role: 'tenant_admin', channel: 'web' });
 
-  const convA = history.createConversation({ tenantId: tallerA, userId: 1, channel: 'web' });
-  const convB = history.createConversation({ tenantId: tallerB, userId: 3, channel: 'web' });
-  const convCarA = history.createConversation({ tenantId: carwashA, userId: 4, channel: 'web' });
+  const convA = history.createConversation({ tenantId: tallerA, userId: userIds[1], channel: 'web' });
+  const convB = history.createConversation({ tenantId: tallerB, userId: userIds[3], channel: 'web' });
+  const convCarA = history.createConversation({ tenantId: carwashA, userId: userIds[4], channel: 'web' });
 
   console.log('\n=== Seguridad: aislamiento de tenant en tools ===');
 
@@ -164,7 +170,7 @@ function runChecks({ tallerA, tallerB, carwashA, agroA }) {
   if (adminDestructiva.actionId) rejectToolCall({ actionId: adminDestructiva.actionId, context: ctxCarwashAdminA }); // no dejar la membresía pendiente de cancelar
 
   const staffLectura = proposeToolCall({ conversationId: convCarA.id, context: ctxCarwashStaffA, toolName: 'carwash.consultarTurnos', args: {} });
-  check('tenant_staff → tool de lectura → autorizado', staffLectura.success === true, JSON.stringify(staffLectura));
+  check('tenant_staff → tool de lectura general → denegado', staffLectura.code === 'PERMISSION_DENIED', JSON.stringify(staffLectura));
 
   console.log('\n=== Rubro: una tool no se puede invocar fuera de su businessType ===');
 

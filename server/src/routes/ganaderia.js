@@ -33,7 +33,7 @@ router.get('/sanidad/alertas', (req, res) => {
     .prepare(
       `SELECT s.*, a.arete, a.nombre AS animal_nombre FROM ganaderia_sanidad s
        JOIN ganaderia_animales a ON a.id = s.animal_id AND a.tenant_id = s.tenant_id
-       WHERE s.tenant_id = ? AND s.proxima_fecha IS NOT NULL AND s.proxima_fecha <= date('now', '+30 day')
+       WHERE s.tenant_id = ? AND s.proxima_fecha IS NOT NULL AND s.proxima_fecha <= date(business_today(s.tenant_id), '+30 day')
        ORDER BY s.proxima_fecha ASC`
     )
     .all(req.user.tenant_id);
@@ -65,4 +65,5 @@ router.get('/produccion/resumen', (req, res) => {
   res.json(ganaderiaService.resumenProduccion(req.user.tenant_id));
 });
 
+router.put('/produccion/:id',require('../security/access').requireAdmin,(req,res)=>res.json(require('../services/milkCorrections').correct(req.user.tenant_id,req.params.id,req.body||{},req.user.sub)));
 module.exports = router;

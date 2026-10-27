@@ -1,7 +1,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { AuthProvider, useAuth } from './lib/auth-context';
+import { AuthProvider } from './lib/auth-context';
+import { useAuth } from './lib/use-auth';
 import Landing from './pages/marketing/Landing';
 import ElegirSistema from './pages/marketing/ElegirSistema';
+import StaffInvitation from './pages/staff/StaffInvitation';
+import WorkerPortal from './pages/staff/WorkerPortal';
+import BarberBoard from './pages/staff/BarberBoard';
+import ResetPassword from './pages/auth/ResetPassword';
 import Login from './pages/auth/Login';
 import Registro from './pages/auth/Registro';
 import OwnerLogin from './pages/owner/OwnerLogin';
@@ -39,6 +44,10 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/elegir-sistema" element={<ElegirSistema />} />
+        <Route path="/invitacion" element={<StaffInvitation/>}/>
+        <Route path="/colaborador" element={<RequireTenant><WorkerPortal/></RequireTenant>}/>
+        <Route path="/agenda-trabajo" element={<RequireTenant><BarberBoard/></RequireTenant>}/>
+        <Route path="/restablecer" element={<ResetPassword />} />
         <Route path="/login/:businessType" element={<Login />} />
         <Route path="/registro/:businessType" element={<Registro />} />
         <Route path="/owner/login" element={<OwnerLogin />} />

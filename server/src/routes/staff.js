@@ -1,0 +1,17 @@
+const router=require('express').Router(),service=require('../services/staffService'),appointments=require('../services/staffAppointments'),db=require('../db');
+const {requireAdmin}=require('../security/access');
+router.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
+router.get('/members',requireAdmin,(req,res)=>res.json(service.people(req.user.tenant_id)));
+router.post('/members',requireAdmin,(req,res)=>res.status(201).json(service.invite(req.user,req.body||{})));
+router.put('/members/:id',requireAdmin,(req,res)=>res.json(service.updateMember(req.user,Number(req.params.id),req.body||{})));
+router.post('/members/:id/invite',requireAdmin,(req,res)=>res.json(service.renew(req.user.tenant_id,Number(req.params.id),req.user.sub)));
+router.get('/tasks',(req,res)=>res.json(service.listTasks(req.user)));
+router.post('/tasks',requireAdmin,(req,res)=>res.status(201).json(service.createTask(req.user,req.body||{})));
+router.put('/tasks/:id/status',(req,res)=>res.json(service.taskAction(req.user,Number(req.params.id),req.body||{})));
+router.put('/tasks/:id/assign',requireAdmin,(req,res)=>res.json(service.reassign(req.user,Number(req.params.id),req.body||{})));
+router.get('/events',requireAdmin,(req,res)=>res.json(db.prepare('SELECT e.*,u.nombre actor FROM staff_events e LEFT JOIN users u ON u.id=e.user_id WHERE e.tenant_id=? ORDER BY e.id DESC LIMIT 100').all(req.user.tenant_id)));
+router.get('/barbers',requireAdmin,(req,res)=>res.json(db.prepare('SELECT id,nombre FROM barberia_barberos WHERE tenant_id=? AND activo=1 ORDER BY nombre').all(req.user.tenant_id)));
+router.get('/appointments',(req,res)=>res.json(appointments.list(req.user,req.query.fecha,req.query.barbero_id)));
+router.post('/appointments/next',(req,res)=>res.json(appointments.next(req.user,req.body||{})));
+router.post('/appointments/:id/action',(req,res)=>res.json(appointments.action(req.user,Number(req.params.id),req.body||{})));
+module.exports=router;

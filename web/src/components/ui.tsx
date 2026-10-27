@@ -1,16 +1,16 @@
 import { Inbox, X } from 'lucide-react';
 import { useEffect } from 'react';
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { ChangeEvent, ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-2xl border border-white/10 bg-slate-900/60 shadow-lg shadow-black/20 backdrop-blur-sm ${className}`}>{children}</div>;
+  return <div className={`surface-card rounded-2xl border border-white/10 shadow-lg shadow-black/10 ${className}`}>{children}</div>;
 }
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-white sm:text-2xl">{title}</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-slate-400">{subtitle}</p>}
       </div>
       {action}
@@ -22,7 +22,7 @@ export function StatCard({ label, value, hint, accent = '#22c55e' }: { label: st
   return (
     <Card className="p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-3xl font-bold tracking-tight text-white">{value}</p>
       {hint && (
         <p className="mt-1 text-xs" style={{ color: accent }}>
           {hint}
@@ -39,7 +39,7 @@ export function Button({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed';
   const styles = {
-    primary: 'bg-emerald-500 text-slate-950 hover:bg-emerald-400',
+    primary: 'bg-[var(--rubro-accent,#34d399)] text-slate-950 hover:brightness-110',
     ghost: 'border border-white/15 text-slate-200 hover:bg-white/5',
     danger: 'bg-red-500/90 text-white hover:bg-red-500',
   };
@@ -51,6 +51,7 @@ export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInpu
     <input
       className={`w-full rounded-lg border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white placeholder:text-slate-500 outline-none focus:border-emerald-400 ${className}`}
       {...props}
+      onInput={props.onInput ?? (['date','time'].includes(props.type || '') ? e => props.onChange?.(e as unknown as ChangeEvent<HTMLInputElement>) : undefined)}
     />
   );
 }
@@ -132,12 +133,13 @@ export function Modal({ open, onClose, title, children }: { open: boolean; onClo
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
+        role="dialog" aria-modal="true" aria-label={title}
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">{title}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white">
+          <button aria-label="Cerrar ventana" onClick={onClose} className="text-slate-400 hover:text-white">
             <X className="h-5 w-5" />
           </button>
         </div>

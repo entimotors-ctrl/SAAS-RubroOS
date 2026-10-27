@@ -2,19 +2,30 @@ const express = require('express');
 const db = require('../db');
 const { simpleCrud } = require('../utils/crud');
 const barberiaService = require('../services/barberiaService');
+const availability = require('../services/barberiaAvailability');
 
 const router = express.Router();
 
-router.use('/barberos', simpleCrud('barberia_barberos', ['nombre', 'especialidad', 'activo'], { required: ['nombre'] }));
+router.get('/disponibilidad', (req, res) => res.json(availability.list(req.user.tenant_id)));
+router.put('/barberos/:id/horarios', (req, res, next) => {
+  try { res.json(availability.setSchedule(req.user.tenant_id, req.params.id, req.body?.horarios)); } catch (err) { next(err); }
+});
+router.post('/bloqueos', (req, res, next) => {
+  try { res.status(201).json(availability.createBlock(req.user.tenant_id, req.body)); } catch (err) { next(err); }
+});
+router.delete('/bloqueos/:id', (req, res, next) => {
+  try { availability.removeBlock(req.user.tenant_id, req.params.id); res.status(204).end(); } catch (err) { next(err); }
+});
+
+router.use('/barberos', simpleCrud('barberia_barberos', ['nombre', 'especialidad', 'activo', 'comision_porcentaje'], { required: ['nombre'] }));
 router.use('/servicios', simpleCrud('barberia_servicios', ['nombre', 'precio', 'duracion_min'], { required: ['nombre'] }));
 router.use('/clientes', simpleCrud('barberia_clientes', ['nombre', 'telefono'], { required: ['nombre'] }));
-router.use(
-  '/citas',
-  simpleCrud('barberia_citas', ['cliente_id', 'barbero_id', 'servicio_id', 'fecha', 'hora', 'estado'], {
-    required: ['fecha', 'hora'],
-    refs: { cliente_id: 'barberia_clientes', barbero_id: 'barberia_barberos', servicio_id: 'barberia_servicios' },
-  })
-);
+router.get('/citas', (req,res)=>res.json(db.prepare('SELECT * FROM barberia_citas WHERE tenant_id=? ORDER BY fecha DESC,hora').all(req.user.tenant_id)));
+router.post('/citas',(req,res,next)=>{try{res.status(201).json(require('../services/barberiaAppointments').save(req.user.tenant_id,req.body||{}));}catch(e){next(e);}});
+router.put('/citas/:id',(req,res,next)=>{try{res.json(require('../services/barberiaAppointments').save(req.user.tenant_id,req.body||{},req.params.id));}catch(e){next(e);}});
+router.get('/comisiones',(req,res)=>res.json(db.prepare(`SELECT b.id,b.nombre,b.comision_porcentaje,COUNT(c.id) AS cuentas,COALESCE(SUM(c.total),0) AS ventas,COALESCE(SUM(c.comision_total),0) AS comision FROM barberia_barberos b LEFT JOIN barberia_cuentas c ON c.barbero_id=b.id AND c.tenant_id=b.tenant_id AND c.estado='pagada' AND business_day(c.cobrada_at,b.tenant_id)=business_today(b.tenant_id) WHERE b.tenant_id=? GROUP BY b.id`).all(req.user.tenant_id)));
+
+router.post('/cobrar',(req,res)=>res.status(201).json(barberiaService.cerrarCuenta(req.user.tenant_id,req.body||{})));
 
 // ---- Cuentas (POS por silla) ----
 router.get('/cuentas', (req, res) => {
@@ -52,10 +63,10 @@ router.post('/cuentas/:id/cobrar', (req, res, next) => {
 router.get('/resumen', (req, res) => {
   const tenantId = req.user.tenant_id;
   const hoy = db
-    .prepare("SELECT COALESCE(SUM(total),0) AS total, COUNT(*) AS n FROM barberia_cuentas WHERE tenant_id = ? AND estado='pagada' AND date(created_at) = date('now')")
+    .prepare("SELECT COALESCE(SUM(total),0) AS total, COUNT(*) AS n FROM barberia_cuentas WHERE tenant_id = ? AND estado='pagada' AND business_day(cobrada_at,tenant_id) = business_today(tenant_id)")
     .get(tenantId);
   const citasHoy = db
-    .prepare("SELECT COUNT(*) AS n FROM barberia_citas WHERE tenant_id = ? AND fecha = date('now')")
+    .prepare("SELECT COUNT(*) AS n FROM barberia_citas WHERE tenant_id = ? AND fecha = business_today(tenant_id)")
     .get(tenantId).n;
   res.json({ ingresosHoy: hoy.total, cortesHoy: hoy.n, citasHoy });
 });

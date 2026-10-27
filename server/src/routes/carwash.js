@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../db');
+const { requireAdmin } = require('../security/access');
 const { simpleCrud } = require('../utils/crud');
 const carwashService = require('../services/carwashService');
 
@@ -42,7 +43,7 @@ router.put('/membresias/:id/renovar', (req, res, next) => {
   }
 });
 
-router.put('/membresias/:id/cancelar', (req, res, next) => {
+router.put('/membresias/:id/cancelar', requireAdmin, (req, res, next) => {
   try {
     const membresia = carwashService.cancelarMembresia(req.user.tenant_id, req.params.id);
     res.json(membresia);
@@ -76,7 +77,7 @@ router.post('/turnos', (req, res, next) => {
 
 router.put('/turnos/:id/estado', (req, res, next) => {
   try {
-    const turno = carwashService.actualizarEstadoTurno(req.user.tenant_id, req.params.id, req.body?.estado);
+    const turno = carwashService.actualizarEstadoTurno(req.user.tenant_id, req.params.id, req.body?.estado, req.body?.metodo_pago);
     res.json(turno);
   } catch (err) {
     next(err);
@@ -86,10 +87,10 @@ router.put('/turnos/:id/estado', (req, res, next) => {
 router.get('/resumen', (req, res) => {
   const tenantId = req.user.tenant_id;
   const hoy = db
-    .prepare("SELECT COALESCE(SUM(precio),0) AS total, COUNT(*) AS n FROM carwash_turnos WHERE tenant_id = ? AND date(created_at) = date('now')")
+    .prepare("SELECT COALESCE(SUM(precio),0) AS total, COUNT(*) AS n FROM carwash_turnos WHERE tenant_id = ? AND estado = 'entregado' AND business_day(entregado_at,tenant_id) = business_today(tenant_id)")
     .get(tenantId);
   const enCola = db.prepare("SELECT COUNT(*) AS n FROM carwash_turnos WHERE tenant_id = ? AND estado IN ('en_cola','lavando')").get(tenantId).n;
-  const membresiasActivas = db.prepare("SELECT COUNT(*) AS n FROM carwash_membresias WHERE tenant_id = ? AND estado = 'activa'").get(tenantId).n;
+  const membresiasActivas = db.prepare("SELECT COUNT(*) AS n FROM carwash_membresias WHERE tenant_id = ? AND estado = 'activa' AND fecha_renovacion >= business_today(tenant_id)").get(tenantId).n;
   res.json({ ingresosHoy: hoy.total, lavadosHoy: hoy.n, enCola, membresiasActivas });
 });
 

@@ -53,7 +53,7 @@ export default function CarwashApp() {
           <PageHeader title="Resumen del carwash" subtitle="La cola y los ingresos de hoy." />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Ingresos de hoy" value={formatL(resumen?.ingresosHoy)} accent={business.accent} />
-            <StatCard label="Lavados hoy" value={resumen?.lavadosHoy ?? 0} />
+            <StatCard label="Lavados entregados hoy" value={resumen?.lavadosHoy ?? 0} />
             <StatCard label="En cola / lavando" value={resumen?.enCola ?? 0} />
             <StatCard label="Membresías activas" value={resumen?.membresiasActivas ?? 0} accent="#22d3ee" />
           </div>
@@ -76,7 +76,7 @@ function Turnos({ turnos, clientes, vehiculos, servicios, membresias, onCreated 
   const [servicioId, setServicioId] = useState('');
   const [usaMembresia, setUsaMembresia] = useState(false);
 
-  const tieneMembresiaActiva = (id: string) => membresias.some((m) => String(m.cliente_id) === id && m.estado === 'activa');
+  const tieneMembresiaActiva = (id: string) => membresias.some((m) => String(m.cliente_id) === id && m.estado === 'activa' && m.fecha_renovacion >= new Date().toISOString().slice(0,10));
 
   const crear = async () => {
     if (!servicioId) return showToast('Selecciona el servicio para el turno.');
@@ -106,7 +106,7 @@ function Turnos({ turnos, clientes, vehiculos, servicios, membresias, onCreated 
               <td className="px-4 py-2.5">{t.usa_membresia ? <Badge tone="success">Membresía</Badge> : formatL(t.precio)}</td>
               <td className="px-4 py-2.5"><Badge tone={t.estado === 'entregado' ? 'success' : 'default'}>{ESTADO_LABEL[t.estado]}</Badge></td>
               <td className="px-4 py-2.5">
-                {t.estado !== 'entregado' && <Button variant="ghost" onClick={() => avanzar(t)}>Avanzar →</Button>}
+                {t.estado !== 'entregado' && <Button variant="ghost" onClick={() => avanzar(t)}>{t.estado==='listo'?(t.usa_membresia?'Entregar con membresía':`Cobrar ${formatL(t.precio)} en efectivo y entregar`):t.estado==='en_cola'?'Iniciar lavado':'Marcar listo'}</Button>}
               </td>
             </tr>
           ))}

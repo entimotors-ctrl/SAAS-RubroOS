@@ -1,4 +1,6 @@
 const db = require('../../db');
+const { activeTenant } = require('../../security/access');
+const { permissionsForRole } = require('../security/permissions');
 const { validateArgs, ValidationError } = require('./validate');
 const { ServiceError } = require('../../services/errors');
 
@@ -84,6 +86,9 @@ function authorize(name, context, rawArgs) {
   const tool = getTool(name);
   if (!tool) return { ok: false, result: { success: false, code: 'TOOL_NOT_FOUND', message: `Herramienta desconocida: ${name}` } };
 
+  if (!activeTenant(context.tenantId, context.businessType)) {
+    return { ok: false, result: { success: false, code: 'TENANT_INACTIVE', message: 'El negocio no está activo' } };
+  }
   const args = stripSmuggledTenant(name, rawArgs);
 
   if (!tool.businessTypes.includes(context.businessType)) {
@@ -96,7 +101,8 @@ function authorize(name, context, rawArgs) {
       },
     };
   }
-  if (!context.permissions?.includes(tool.permission)) {
+  const user = db.prepare('SELECT role,access_status FROM users WHERE id = ? AND tenant_id = ? AND business_type = ?').get(context.userId, context.tenantId, context.businessType);
+  if (!user || user.access_status!=='activo' || !permissionsForRole(user.role, context.businessType).includes(tool.permission) || !context.permissions?.includes(tool.permission)) {
     return { ok: false, result: { success: false, code: 'PERMISSION_DENIED', message: `No tienes permiso (${tool.permission}) para esta acción` } };
   }
   try {

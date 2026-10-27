@@ -50,13 +50,13 @@ function seedTaller(tenantId) {
 }
 
 function seedBarberia(tenantId) {
-  const b1 = db.prepare('INSERT INTO barberia_barberos (tenant_id, nombre, especialidad, activo) VALUES (?,?,?,1)').run(tenantId, 'Junior Flores', 'Fade y diseño');
-  db.prepare('INSERT INTO barberia_barberos (tenant_id, nombre, especialidad, activo) VALUES (?,?,?,1)').run(tenantId, 'Kevin Paz', 'Barba y clásico');
+  const b1 = db.prepare('INSERT INTO barberia_barberos (tenant_id, nombre, especialidad, activo, comision_porcentaje) VALUES (?,?,?,1,40)').run(tenantId, 'Junior Flores', 'Fade y diseño');
+  db.prepare('INSERT INTO barberia_barberos (tenant_id, nombre, especialidad, activo, comision_porcentaje) VALUES (?,?,?,1,40)').run(tenantId, 'Kevin Paz', 'Barba y clásico');
   db.prepare('INSERT INTO barberia_servicios (tenant_id, nombre, precio, duracion_min) VALUES (?,?,?,?)').run(tenantId, 'Corte clásico', 150, 30);
   const s2 = db.prepare('INSERT INTO barberia_servicios (tenant_id, nombre, precio, duracion_min) VALUES (?,?,?,?)').run(tenantId, 'Corte + Barba', 250, 45);
   const cliente = db.prepare('INSERT INTO barberia_clientes (tenant_id, nombre, telefono) VALUES (?,?,?)').run(tenantId, 'Douglas Martínez', '9977-3344');
   db.prepare("INSERT INTO barberia_citas (tenant_id, cliente_id, barbero_id, servicio_id, fecha, hora, estado) VALUES (?,?,?,?,date('now'),'11:00','pendiente')").run(tenantId, cliente.lastInsertRowid, b1.lastInsertRowid, s2.lastInsertRowid);
-  const cuenta = db.prepare("INSERT INTO barberia_cuentas (tenant_id, cliente_id, barbero_id, estado, total, metodo_pago) VALUES (?,?,?,'pagada',250,'efectivo')").run(tenantId, cliente.lastInsertRowid, b1.lastInsertRowid);
+  const cuenta = db.prepare("INSERT INTO barberia_cuentas (tenant_id, cliente_id, barbero_id, estado, total, metodo_pago, cobrada_at, comision_total) VALUES (?,?,?,'pagada',250,'efectivo',datetime('now'),100)").run(tenantId, cliente.lastInsertRowid, b1.lastInsertRowid);
   db.prepare('INSERT INTO barberia_cuenta_items (cuenta_id, tipo, descripcion, cantidad, precio_unitario, subtotal) VALUES (?,?,?,?,?,?)').run(cuenta.lastInsertRowid, 'servicio', 'Corte + Barba', 1, 250, 250);
 }
 
@@ -71,7 +71,7 @@ function seedAgro(tenantId) {
   db.prepare("INSERT INTO agro_cotizaciones_dron (tenant_id, cliente_nombre, hectareas, tipo_servicio, precio_estimado) VALUES (?,?,?,?,?)").run(tenantId, 'Finca El Roble, Catacamas', 12, 'fumigacion', 4200);
   db.prepare("INSERT INTO agro_cotizaciones_cerca (tenant_id, cliente_nombre, metros, hilos, precio_estimado) VALUES (?,?,?,?,?)").run(tenantId, 'Finca El Roble, Catacamas', 500, 4, 34000);
   const pedido = db.prepare("INSERT INTO agro_pedidos (tenant_id, cliente_id, estado, total) VALUES (?,?,'pendiente',3700)").run(tenantId, cliente.lastInsertRowid);
-  db.prepare('INSERT INTO agro_pedido_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?,?,?,?,?)').run(pedido.lastInsertRowid, 1, 2, 1850, 3700);
+  db.prepare('INSERT INTO agro_pedido_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?,?,?,?,?)').run(pedido.lastInsertRowid, db.prepare('SELECT id FROM agro_productos WHERE tenant_id=? ORDER BY id LIMIT 1').get(tenantId).id, 2, 1850, 3700);
 }
 
 function seedGanaderia(tenantId) {
@@ -113,12 +113,13 @@ function ensureSeed() {
           'Falta OWNER_SEED_PASSWORD en el entorno. Defínela en server/.env (ver server/.env.example) antes de arrancar el servidor por primera vez, para crear la cuenta owner.'
         );
       }
-      const hash = bcrypt.hashSync(OWNER_PASSWORD, 10);
+      if(process.env.NODE_ENV==='production'&&(!process.env.OWNER_EMAIL||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(OWNER_EMAIL)))throw Error('Configura el correo real del dueño en OWNER_EMAIL');
+      const hash = process.env.NODE_ENV==='production'?require('./services/passwords').hashPassword(OWNER_PASSWORD):bcrypt.hashSync(OWNER_PASSWORD, 10);
       db.prepare("INSERT INTO users (tenant_id, business_type, email, password_hash, nombre, role) VALUES (NULL, NULL, ?, ?, 'Dueño RubroOS', 'owner')").run(OWNER_EMAIL, hash);
       console.log(`[seed] Cuenta owner creada: ${OWNER_EMAIL}`);
     }
 
-    if (!yaSembrado) {
+    if (!yaSembrado && process.env.NODE_ENV !== 'production') {
       const taller = crearTenant('taller', 'Moto Taller Rápido', 'moto-taller-rapido');
       crearUsuario(taller, 'taller', 'demo@taller.test', 'Douglas (Taller)');
       crearUsuarioMaestro(taller, 'taller');

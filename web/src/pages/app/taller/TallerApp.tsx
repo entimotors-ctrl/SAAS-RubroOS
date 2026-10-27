@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Bike, Calendar, CreditCard, LayoutDashboard, Package, Receipt, Users } from 'lucide-react';
+import { RepairOrders } from './RepairOrders';
+import { useEffect, useState, useRef } from 'react';
+import { ClipboardList, Bike, Calendar, CreditCard, LayoutDashboard, Package, Receipt, Users } from 'lucide-react';
 import { DashboardShell, type NavItem } from '../../../components/DashboardShell';
 import { getBusinessType } from '../../../lib/business-types';
 import { apiGet, apiPost } from '../../../lib/api';
@@ -11,6 +12,7 @@ const business = getBusinessType('taller')!;
 
 const NAV: NavItem[] = [
   { id: 'resumen', label: 'Resumen', icon: LayoutDashboard },
+  { id: 'ordenes', label: 'Órdenes de reparación', icon: ClipboardList },
   { id: 'pos', label: 'Punto de Venta', icon: Receipt },
   { id: 'creditos', label: 'Créditos', icon: CreditCard },
   { id: 'clientes', label: 'Clientes', icon: Users },
@@ -29,7 +31,7 @@ interface Venta {
   id: number; cliente_id: number | null; cliente_nombre?: string; tipo: string; total: number; pagado: number; saldo: number;
   estado: string; created_at: string; items: VentaItem[]; abonos: Abono[];
 }
-interface Resumen { ventasHoy: number; ventasUltimaSemana: { dia: string; total: number }[]; creditoPendiente: number; citasHoy: number }
+interface Resumen { ventasHoy: number; ventasUltimaSemana: { dia: string; total: number }[]; creditoPendiente: number; citasHoy: number; vehiculosEnTaller: number }
 
 export default function TallerApp() {
   const [tab, setTab] = useState('resumen');
@@ -56,6 +58,7 @@ export default function TallerApp() {
   return (
     <DashboardShell business={business} navItems={NAV} activeTab={tab} onTabChange={setTab}>
       {tab === 'resumen' && <Resumen resumen={resumen} citas={citas} nombreCliente={nombreCliente} />}
+      {tab === 'ordenes' && <RepairOrders clientes={clientes} vehiculos={vehiculos} inventario={inventario} onChanged={cargarTodo} />}
       {tab === 'pos' && <Pos clientes={clientes} inventario={inventario} onCreated={cargarTodo} />}
       {tab === 'creditos' && <Creditos ventas={ventas.filter((v) => v.estado === 'credito_abierto')} onAbonado={cargarTodo} />}
       {tab === 'clientes' && <Clientes clientes={clientes} onCreated={cargarTodo} />}
@@ -67,7 +70,6 @@ export default function TallerApp() {
 }
 
 function Resumen({ resumen, citas, nombreCliente }: { resumen: Resumen | null; citas: Cita[]; nombreCliente: (id: number | null) => string }) {
-  const citasHoy = citas.filter((c) => c.estado !== 'cancelada');
   return (
     <div>
       <PageHeader title="Resumen del taller" subtitle="Lo que está pasando hoy en tu negocio." />
@@ -75,10 +77,10 @@ function Resumen({ resumen, citas, nombreCliente }: { resumen: Resumen | null; c
         <StatCard label="Ventas de hoy" value={formatL(resumen?.ventasHoy)} accent={business.accent} />
         <StatCard label="Crédito pendiente de cobro" value={formatL(resumen?.creditoPendiente)} accent="#f87171" />
         <StatCard label="Citas de hoy" value={resumen?.citasHoy ?? 0} />
-        <StatCard label="Vehículos en taller" value={citasHoy.length} />
+        <StatCard label="Vehículos en taller" value={resumen?.vehiculosEnTaller ?? 0} />
       </div>
       <div className="mt-6">
-        <h3 className="mb-3 text-sm font-semibold text-slate-300">Próximas citas</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-300">Citas registradas</h3>
         {citas.length === 0 ? (
           <EmptyState message="Sin citas registradas todavía." />
         ) : (
@@ -100,13 +102,16 @@ function Resumen({ resumen, citas, nombreCliente }: { resumen: Resumen | null; c
 }
 
 function Pos({ clientes, inventario, onCreated }: { clientes: Cliente[]; inventario: InventarioItem[]; onCreated: () => void }) {
-  const [carrito, setCarrito] = useState<{ descripcion: string; cantidad: number; precio_unitario: number }[]>([]);
+  const [carrito, setCarrito] = useState<{ producto_id?: number; descripcion: string; cantidad: number; precio_unitario: number }[]>([]);
   const [descripcion, setDescripcion] = useState('');
   const [precio, setPrecio] = useState('');
   const [cantidad, setCantidad] = useState('1');
   const [clienteId, setClienteId] = useState('');
   const [tipo, setTipo] = useState<'contado' | 'credito'>('contado');
   const [pagadoInicial, setPagadoInicial] = useState('');
+  const [cobrando, setCobrando] = useState(false);
+  const request = useRef<{ key: string; payload: string } | null>(null);
+  const inFlight = useRef(false);
   const [ultimaVenta, setUltimaVenta] = useState<Venta | null>(null);
 
   const total = carrito.reduce((s, i) => s + i.cantidad * i.precio_unitario, 0);
@@ -120,21 +125,28 @@ function Pos({ clientes, inventario, onCreated }: { clientes: Cliente[]; inventa
   };
 
   const agregarDesdeInventario = (item: InventarioItem) => {
-    setCarrito((c) => [...c, { descripcion: item.nombre, cantidad: 1, precio_unitario: item.precio }]);
+    const reserved = carrito.filter(i => i.producto_id === item.id).reduce((n, i) => n + i.cantidad, 0);
+    if (reserved + 1 > item.stock) return showToast('No hay existencias suficientes de este producto.');
+    setCarrito((c) => [...c, { producto_id: item.id, descripcion: item.nombre, cantidad: 1, precio_unitario: item.precio }]);
   };
 
   const cobrar = async () => {
-    if (carrito.length === 0) return;
-    const venta = await apiPost<Venta>('/taller/ventas', {
-      cliente_id: clienteId ? Number(clienteId) : null,
-      tipo,
-      pagado_inicial: tipo === 'credito' ? Number(pagadoInicial || 0) : undefined,
-      items: carrito,
-    });
-    setUltimaVenta(venta);
-    setCarrito([]);
-    setPagadoInicial('');
-    onCreated();
+    if (carrito.length === 0 || inFlight.current) return;
+    const body = { cliente_id: clienteId ? Number(clienteId) : null, tipo,
+      pagado_inicial: tipo === 'credito' ? Number(pagadoInicial || 0) : undefined, items: carrito };
+    const payload = JSON.stringify(body);
+    if (!request.current || request.current.payload !== payload) request.current = { key: crypto.randomUUID(), payload };
+    inFlight.current = true;
+    setCobrando(true);
+    try {
+      const venta = await apiPost<Venta>('/taller/ventas', { ...body, request_key: request.current.key });
+      setUltimaVenta(venta);
+      setCarrito([]);
+      setPagadoInicial('');
+      request.current = null;
+      onCreated();
+    } catch { /* API displays the error; keep the cart and retry key. */ }
+    finally { inFlight.current = false; setCobrando(false); }
   };
 
   return (
@@ -157,10 +169,10 @@ function Pos({ clientes, inventario, onCreated }: { clientes: Cliente[]; inventa
                 {inventario.map((i) => (
                   <button
                     key={i.id}
-                    onClick={() => agregarDesdeInventario(i)}
+                    onClick={() => agregarDesdeInventario(i)} disabled={cobrando || i.stock <= 0}
                     className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:border-orange-400 hover:text-white"
                   >
-                    {i.nombre} · {formatL(i.precio)}
+                    {i.nombre} · {formatL(i.precio)} · Stock {i.stock}
                   </button>
                 ))}
               </div>
@@ -170,13 +182,14 @@ function Pos({ clientes, inventario, onCreated }: { clientes: Cliente[]; inventa
           {carrito.length === 0 ? (
             <EmptyState message="El carrito está vacío." />
           ) : (
-            <Table head={['Descripción', 'Cant.', 'P. Unit.', 'Subtotal']}>
+            <Table head={['Descripción', 'Cant.', 'P. Unit.', 'Subtotal', '']}>
               {carrito.map((i, idx) => (
                 <tr key={idx}>
                   <td className="px-4 py-2.5">{i.descripcion}</td>
                   <td className="px-4 py-2.5">{i.cantidad}</td>
                   <td className="px-4 py-2.5">{formatL(i.precio_unitario)}</td>
                   <td className="px-4 py-2.5">{formatL(i.cantidad * i.precio_unitario)}</td>
+                  <td><Button variant="ghost" disabled={cobrando} onClick={() => setCarrito(c => c.filter((_, n) => n !== idx))}>Quitar</Button></td>
                 </tr>
               ))}
             </Table>
@@ -209,8 +222,8 @@ function Pos({ clientes, inventario, onCreated }: { clientes: Cliente[]; inventa
               <p className="text-xs text-slate-400">Total</p>
               <p className="text-2xl font-bold text-white">{formatL(total)}</p>
             </div>
-            <Button className="w-full" onClick={cobrar} disabled={carrito.length === 0}>
-              Cobrar venta
+            <Button className="w-full" onClick={cobrar} disabled={cobrando || carrito.length === 0}>
+              {cobrando ? 'Registrando…' : 'Cobrar venta'}
             </Button>
           </div>
 

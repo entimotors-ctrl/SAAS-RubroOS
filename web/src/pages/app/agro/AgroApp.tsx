@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Drone, LayoutDashboard, Package, ShoppingCart, Users, Zap } from 'lucide-react';
 import { DashboardShell, type NavItem } from '../../../components/DashboardShell';
 import { getBusinessType } from '../../../lib/business-types';
-import { apiGet, apiPost } from '../../../lib/api';
+import { apiGet, apiPost, apiPut } from '../../../lib/api';
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, StatCard, Table } from '../../../components/ui';
 import { formatDate, formatL } from '../../../lib/currency';
+import { useAuth } from '../../../lib/use-auth';
 import { showToast } from '../../../lib/toast';
 
 const business = getBusinessType('agro')!;
@@ -21,7 +22,7 @@ const NAV: NavItem[] = [
 interface Producto { id: number; nombre: string; categoria?: string; precio: number; stock: number; unidad?: string }
 interface Cliente { id: number; nombre: string; finca?: string; telefono?: string }
 interface PedidoItem { producto_id: number | null; cantidad: number; precio_unitario: number; subtotal: number }
-interface Pedido { id: number; cliente_id: number | null; cliente_nombre?: string; estado: string; total: number; created_at: string; items: PedidoItem[] }
+interface Pedido { pagado: number; reembolsado: number; cobrado_at?: string; id: number; cliente_id: number | null; cliente_nombre?: string; estado: string; total: number; created_at: string; items: PedidoItem[] }
 interface CotizacionDron { id: number; cliente_nombre?: string; hectareas: number; tipo_servicio: string; precio_estimado: number; created_at: string }
 interface CotizacionCerca { id: number; cliente_nombre?: string; metros: number; hilos: number; precio_estimado: number; created_at: string }
 
@@ -250,15 +251,16 @@ function Pedidos({ pedidos, productos, clientes, onCreated }: { pedidos: Pedido[
 
   return (
     <div>
-      <PageHeader title="Pedidos" action={<Button onClick={() => setOpen(true)}>+ Nuevo pedido</Button>} />
+      <PageHeader title="Pedidos" subtitle="El inventario se descuenta al entregar. La entrega no registra un cobro." action={<Button onClick={() => setOpen(true)}>+ Nuevo pedido</Button>} />
       {pedidos.length === 0 ? <EmptyState message="Aún no hay pedidos." actionLabel="+ Crear el primero" onAction={() => setOpen(true)} /> : (
-        <Table head={['Fecha', 'Cliente', 'Total', 'Estado']}>
+        <Table head={['Fecha', 'Cliente', 'Total', 'Estado', 'Operación']}>
           {pedidos.map((p) => (
             <tr key={p.id}>
               <td className="px-4 py-2.5">{formatDate(p.created_at)}</td>
               <td className="px-4 py-2.5">{p.cliente_nombre || '—'}</td>
               <td className="px-4 py-2.5">{formatL(p.total)}</td>
-              <td className="px-4 py-2.5"><Badge>{p.estado}</Badge></td>
+              <td className="px-4 py-2.5"><Badge tone={p.estado==='entregado'?'success':p.estado==='cancelado'?'danger':'warning'}>{p.estado}</Badge></td>
+              <td className="px-4 py-2.5">{!['entregado','cancelado','devuelto'].includes(p.estado)&&<div className="flex gap-2"><Button variant="ghost" onClick={async()=>{try{await apiPut(`/agro/pedidos/${p.id}/estado`,{estado:p.estado==='pendiente'?'preparando':'entregado'});onCreated();}catch{/* API displays error */}}}>{p.estado==='pendiente'?'Preparar':'Entregar y descontar stock'}</Button><Button variant="ghost" onClick={async()=>{try{await apiPut(`/agro/pedidos/${p.id}/estado`,{estado:'cancelado'});onCreated();}catch{/* API displays error */}}}>Cancelar</Button></div>}<PedidoCobro pedido={p} onChanged={onCreated}/></td>
             </tr>
           ))}
         </Table>
@@ -278,7 +280,7 @@ function Pedidos({ pedidos, productos, clientes, onCreated }: { pedidos: Pedido[
               </button>
             ))}
           </div>
-          {carrito.map((i, idx) => <p key={idx} className="text-xs text-slate-400">{i.nombre} × {i.cantidad} = {formatL(i.cantidad * i.precio_unitario)}</p>)}
+          {carrito.map((i,idx)=><div key={idx} className="flex items-center gap-2 text-xs"><span className="flex-1">{i.nombre}</span><Input aria-label={`Cantidad ${i.nombre} ${idx+1}`} type="number" min="0.001" step="0.001" value={i.cantidad} className="max-w-24" onChange={e=>setCarrito(carrito.map((x,j)=>j===idx?{...x,cantidad:Number(e.target.value)}:x))}/><button onClick={()=>setCarrito(carrito.filter((_,j)=>j!==idx))} className="text-red-300">Quitar</button></div>)}
           <div className="rounded-xl bg-white/5 p-3 text-right">
             <p className="text-xs text-slate-400">Total</p>
             <p className="text-xl font-bold text-white">{formatL(total)}</p>
@@ -327,4 +329,11 @@ function Clientes({ clientes, onCreated }: { clientes: Cliente[]; onCreated: () 
       </Modal>
     </div>
   );
+}
+
+function PedidoCobro({pedido:p,onChanged}:{pedido:Pedido;onChanged:()=>void}) {
+ const {user}=useAuth(); const [action,setAction]=useState('');const [method,setMethod]=useState('efectivo');const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);
+ const save=async()=>{setBusy(true);try{await apiPost(`/agro/pedidos/${p.id}/${action}`,action==='cobrar'?{metodo_pago:method}:{motivo:reason});setAction('');onChanged();}catch{/* API displays error */}finally{setBusy(false);}};
+ return <><p className="text-xs text-slate-400">Cobrado: {formatL(p.pagado||0)}{p.reembolsado>0&&` · Reembolso registrado: ${formatL(p.reembolsado)}`}</p>{user?.role==='tenant_admin'&&p.estado==='entregado'&&<div className="flex gap-2">{!p.cobrado_at&&<Button variant="ghost" onClick={()=>setAction('cobrar')}>Registrar cobro</Button>}<Button variant="ghost" onClick={()=>setAction('devolver')}>Devolver pedido</Button></div>}
+ <Modal open={!!action} onClose={()=>!busy&&setAction('')} title={action==='cobrar'?'Registrar cobro recibido':'Registrar devolución completa'}><div className="space-y-4"><p className="text-sm text-slate-300">Pedido #{p.id} · {formatL(p.total)}</p>{action==='cobrar'?<><p className="text-sm text-slate-400">Confirma solo cuando hayas recibido el dinero. Este registro no carga una tarjeta ni procesa transferencias.</p><Field label="Método de pago"><Select value={method} onChange={e=>setMethod(e.target.value)}><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="transferencia">Transferencia</option></Select></Field></>:<><p className="text-sm text-slate-400">Confirma que recibiste todos los productos y devolviste {formatL(p.pagado||0)} al cliente. Se repondrá el inventario una sola vez. El sistema registra el reembolso; debes realizarlo por el medio de pago correspondiente.</p><Field label="Motivo de la devolución"><Input value={reason} maxLength={500} onChange={e=>setReason(e.target.value)}/></Field></>}<Button disabled={busy||(action==='devolver'&&reason.trim().length<5)} onClick={save}>{busy?'Guardando…':'Confirmar registro'}</Button></div></Modal></>;
 }

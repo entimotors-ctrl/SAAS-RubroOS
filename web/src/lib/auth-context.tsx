@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { apiGet, apiPost, setToken, getToken } from './api';
 import type { BusinessTypeId } from './business-types';
+import { AuthContext } from './auth-store';
 
 export interface AuthUser {
   id: number;
@@ -25,29 +26,14 @@ interface AuthResponse {
   tenant?: Tenant;
 }
 
-interface AuthContextValue {
-  user: AuthUser | null;
-  tenant: Tenant | null;
-  loading: boolean;
-  login: (business_type: BusinessTypeId, email: string, password: string) => Promise<AuthUser>;
-  registro: (data: { business_type: BusinessTypeId; empresa_nombre: string; nombre: string; email: string; password: string }) => Promise<AuthUser>;
-  ownerLogin: (email: string, password: string) => Promise<AuthUser>;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(getToken()));
 
   useEffect(() => {
     const token = getToken();
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    if (!token) return;
     apiGet<{ user: AuthUser; tenant?: Tenant }>('/auth/me')
       .then((res) => {
         setUser(res.user);
@@ -86,6 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.user;
   }, []);
 
+  const activateStaff = useCallback(async (token: string, password: string) => {
+    const res = await apiPost<AuthResponse>('/staff-public/activate', { token, password });
+    setToken(res.token);
+    setUser(res.user);
+    setTenant(res.tenant || null);
+  }, []);
+
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
@@ -93,15 +86,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, tenant, loading, login, registro, ownerLogin, logout }),
-    [user, tenant, loading, login, registro, ownerLogin, logout]
+    () => ({ user, tenant, loading, login, registro, ownerLogin, logout, activateStaff }),
+    [user, tenant, loading, login, registro, ownerLogin, logout, activateStaff]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth debe usarse dentro de AuthProvider');
-  return ctx;
 }

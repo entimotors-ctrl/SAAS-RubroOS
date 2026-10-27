@@ -39,8 +39,8 @@ function noResuelto(conversation, context, pending, motivo) {
 }
 
 /**
- * Intercepta un mensaje entrante ANTES de mandarlo al LLM, solo cuando hay
- * al menos una acción esperando confirmación en la conversación. La capa
+ * Intercepta confirmaciones/cancelaciones ANTES de mandarlas al LLM, incluso
+ * cuando no quedan acciones pendientes en la conversación. La capa
  * determinista (tokens exactos, "cancelar N", número suelto, frases de
  * cancelación masiva) tiene siempre prioridad y nunca interpreta lenguaje
  * natural arbitrario — así "no sé cuántos productos tengo" no se confunde
@@ -59,7 +59,16 @@ function noResuelto(conversation, context, pending, motivo) {
 async function tryHandle({ context, conversation, text }) {
   const norm = normalize(text);
   const pending = history.listPendingActions(conversation.id, context.tenantId);
-  if (pending.length === 0) return null;
+  if (pending.length === 0) {
+    const isActionIntent = CONFIRM_TOKENS.has(norm) || CANCEL_TOKENS.has(norm)
+      || BULK_CANCEL_PHRASES.has(norm) || /^(cancelar|cancela|no)\s+\d+$/.test(norm)
+      || /^\d+$/.test(norm);
+    if (!isActionIntent) return null;
+    const message = 'No hay acciones pendientes para confirmar o cancelar en esta conversación. No se realizó ningún cambio.';
+    history.recordMessage(conversation.id, context.tenantId, 'user', text);
+    history.recordMessage(conversation.id, context.tenantId, 'assistant', message);
+    return { type: 'message', conversationId: conversation.id, message };
+  }
 
   // "cancela 2" / "cancelar 2" / "no 2" -> cancela esa posición SI existe
   // en la lista actual de pendientes; si no existe (posición vencida,
