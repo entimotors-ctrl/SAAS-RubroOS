@@ -25,6 +25,11 @@ Navegador ──HTTPS──> API Express RubroOS ──TLS──> Supabase Postg
 - Las tablas estarán en un esquema propio de RubroOS, fuera de los esquemas expuestos por la Data API. Las reglas RLS se añaden como defensa adicional y se prueban por tenant.
 - Se creará un rol de aplicación con los mínimos permisos; no se utilizará una cuenta administradora de PostgreSQL para ejecutar la API diaria.
 
+## Estado de la migración
+
+- ✅ **Fase 1 (esquema) completada el 27 de octubre de 2026.** Las 50 tablas de negocio (los 5 rubros, IA, WhatsApp, operación transversal y portal de colaboradores) están traducidas a SQL versionado en `supabase/migrations/` (50 tablas; se excluye a propósito `schema_migrations`, que era contabilidad interna del runner de SQLite). Se aplicaron las 9 migraciones contra un PostgreSQL real en un contenedor desechable (imagen oficial de Supabase) y se verificó: creación sin errores, el trigger de horario inicial de barbero, los índices únicos parciales (idempotencia de `ai_actions`, número de WhatsApp activo único entre tenants) y las claves foráneas rechazando referencias inexistentes. Las convenciones de tipos usadas (identity BIGINT, NUMERIC para dinero/cantidades, TIMESTAMPTZ para marcas de tiempo, DATE para fechas de calendario) están documentadas como comentario en `supabase/migrations/20261027140000_core.sql`.
+- ⬜ Fase 2 (adaptador `pg`), Fase 3 (RLS), Fase 4 (importación) y Fase 5 (piloto paralelo) siguen pendientes. Ningún código del servidor cambió todavía — `server/package.json` sigue sin la dependencia `pg` y la API sigue sirviendo sobre `better-sqlite3`.
+
 ## Fases de trabajo
 
 1. **Esquema PostgreSQL.** Traducir tablas, índices, claves foráneas, restricciones y datos iniciales a migraciones SQL versionadas en `supabase/migrations`.
