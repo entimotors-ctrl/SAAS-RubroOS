@@ -1,3 +1,14 @@
+// Selector de motor (Fase 2 de la migración a Supabase, ver
+// docs/MIGRACION-SUPABASE-POSTGRES.md): con DATABASE_URL definida, el server
+// habla con PostgreSQL a través de server/src/db/postgres.js, que expone el
+// mismo API (`.prepare().get/all/run`, `.transaction().immediate()`) pero
+// async. Sin DATABASE_URL, el comportamiento es IDÉNTICO al de siempre
+// (SQLite síncrono) — nada cambia para quien no la configure.
+if (process.env.DATABASE_URL) {
+  module.exports = require('./db/postgres');
+  return;
+}
+
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');

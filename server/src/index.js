@@ -1,5 +1,9 @@
 if (process.env.SKIP_ENV_FILE !== '1') require('dotenv').config({ quiet: true });
 require('./config/environment').validateEnvironment();
+// Permite que los route handlers sean async y que un throw/rejection dentro
+// de ellos llegue al error handler de abajo sin envolver cada ruta a mano.
+// No-op para handlers síncronos existentes (ver docs/MIGRACION-SUPABASE-POSTGRES.md).
+require('express-async-errors');
 
 const express = require('express');
 const cors = require('cors');
@@ -40,7 +44,7 @@ app.use(cors({ origin: corsOrigins }));
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, name: 'RubroOS API' }));
-app.get('/api/ready',(req,res)=>{try{db.prepare('SELECT 1').get();res.json({ok:true});}catch{res.status(503).json({ok:false});}});
+app.get('/api/ready',async(req,res)=>{try{await db.prepare('SELECT 1').get();res.json({ok:true});}catch{res.status(503).json({ok:false});}});
 app.get('/api/business-types', (req, res) => res.json(BUSINESS_TYPES));
 
 app.use('/api/auth', authRoutes);
@@ -82,7 +86,7 @@ app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 app.use((err, req, res, next) => {
   if(err.type==='entity.parse.failed')return res.status(400).json({error:'JSON inválido'});
   if(err.type==='entity.too.large')return res.status(413).json({error:'Solicitud demasiado grande'});
-  if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+  if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.code === '23505') {
     return res.status(409).json({ error: 'Ya existe un registro con esos datos (por ejemplo, un arete duplicado).' });
   }
   // Errores de la capa de servicios (server/src/services/*): ya vienen con
