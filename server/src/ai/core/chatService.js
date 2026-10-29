@@ -95,7 +95,7 @@ async function handleChatMessage({ context, conversationId, userMessage, provide
     // comportamiento no cambia. Solo se aplica a la PRIMERA tool call del
     // turno: si el modelo encadena varias, únicamente la primera puede
     // corresponder al mensaje entrante que se está deduplicando.
-    const toolResult = proposeToolCall({
+    const toolResult = await proposeToolCall({
       conversationId: conversation.id,
       context,
       toolName: response.toolName,
@@ -123,7 +123,7 @@ async function confirmAndReply({ context, actionId, provider }) {
   if (!action) return { type: 'error', code: 'ACTION_NOT_FOUND', message: 'No encontré esa acción para confirmar.' };
 
   const conversation = history.getConversation(action.conversation_id, context.tenantId);
-  const result = confirmToolCall({ actionId, context });
+  const result = await confirmToolCall({ actionId, context });
 
   if (!result.success) {
     const text = `No pude completar la acción: ${result.message}`;
@@ -150,11 +150,11 @@ async function confirmAndReply({ context, actionId, provider }) {
   return { type: 'message', conversationId: conversation?.id, message: text };
 }
 
-function cancelAndReply({ context, actionId }) {
+async function cancelAndReply({ context, actionId }) {
   const action = history.getAction(actionId, context.tenantId);
   if (!action) return { type: 'error', code: 'ACTION_NOT_FOUND', message: 'No encontré esa acción para cancelar.' };
   const conversation = history.getConversation(action.conversation_id, context.tenantId);
-  const result = rejectToolCall({ actionId, context });
+  const result = await rejectToolCall({ actionId, context });
   if (!result.success) {
     return { type: 'message', conversationId: conversation?.id, message: `No pude cancelar: ${result.message}` };
   }

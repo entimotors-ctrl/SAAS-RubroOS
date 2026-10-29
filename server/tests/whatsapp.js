@@ -380,7 +380,7 @@ async function runChecks() {
 
   const staffLinkIntento = await api('/whatsapp-identity/link', {
     method: 'POST',
-    token: signToken({ sub: staffUserId, tenant_id: carwash.tenantId, business_type: 'carwash', role: 'tenant_staff', nombre: 'QA Staff', email: 'x' }),
+    token: await signToken({ sub: staffUserId, tenant_id: carwash.tenantId, business_type: 'carwash', role: 'tenant_staff', nombre: 'QA Staff', email: 'x' }),
     body: { phone_number: '+504 1234-5678' },
   });
   check('tenant_staff no puede vincular (403)', staffLinkIntento.status === 403);

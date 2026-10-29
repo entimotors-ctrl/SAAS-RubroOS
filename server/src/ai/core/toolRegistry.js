@@ -82,11 +82,11 @@ function stripSmuggledTenant(name, rawArgs) {
  * confirmación — así no se le pide confirmar al usuario algo que de
  * cualquier forma iba a fallar por datos inválidos.
  */
-function authorize(name, context, rawArgs) {
+async function authorize(name, context, rawArgs) {
   const tool = getTool(name);
   if (!tool) return { ok: false, result: { success: false, code: 'TOOL_NOT_FOUND', message: `Herramienta desconocida: ${name}` } };
 
-  if (!activeTenant(context.tenantId, context.businessType)) {
+  if (!(await activeTenant(context.tenantId, context.businessType))) {
     return { ok: false, result: { success: false, code: 'TENANT_INACTIVE', message: 'El negocio no está activo' } };
   }
   const args = stripSmuggledTenant(name, rawArgs);
@@ -101,7 +101,7 @@ function authorize(name, context, rawArgs) {
       },
     };
   }
-  const user = db.prepare('SELECT role,access_status FROM users WHERE id = ? AND tenant_id = ? AND business_type = ?').get(context.userId, context.tenantId, context.businessType);
+  const user = await db.prepare('SELECT role,access_status FROM users WHERE id = ? AND tenant_id = ? AND business_type = ?').get(context.userId, context.tenantId, context.businessType);
   if (!user || user.access_status!=='activo' || !permissionsForRole(user.role, context.businessType).includes(tool.permission) || !context.permissions?.includes(tool.permission)) {
     return { ok: false, result: { success: false, code: 'PERMISSION_DENIED', message: `No tienes permiso (${tool.permission}) para esta acción` } };
   }
@@ -115,7 +115,7 @@ function authorize(name, context, rawArgs) {
   for (const [field, refTable] of Object.entries(tool.refs || {})) {
     const value = args[field];
     if (value === undefined || value === null || value === '') continue;
-    const row = db.prepare(`SELECT 1 FROM ${refTable} WHERE id = ? AND tenant_id = ?`).get(value, context.tenantId);
+    const row = await db.prepare(`SELECT 1 FROM ${refTable} WHERE id = ? AND tenant_id = ?`).get(value, context.tenantId);
     if (!row) {
       return { ok: false, result: { success: false, code: 'VALIDATION_ERROR', message: `"${field}" no existe o no pertenece a tu negocio` } };
     }
@@ -129,12 +129,12 @@ function authorize(name, context, rawArgs) {
  * { success:false, code, message }, para que el modelo (o el propio
  * orchestrator) puedan manejarlo sin ver mensajes de SQLite ni stack traces.
  */
-function runTool(name, context, rawArgs) {
-  const auth = authorize(name, context, rawArgs);
+async function runTool(name, context, rawArgs) {
+  const auth = await authorize(name, context, rawArgs);
   if (!auth.ok) return auth.result;
 
   try {
-    const data = auth.tool.handler(context, auth.args);
+    const data = await auth.tool.handler(context, auth.args);
     return { success: true, data };
   } catch (err) {
     if (err instanceof ServiceError) {

@@ -56,7 +56,7 @@ async function registro(business_type, tag) {
   return { token: r.body.token, tenantId: r.body.tenant.id, userId: r.body.user.id, email };
 }
 
-function tokenForStaffUser({ tenantId, businessType, userId, email }) {
+async function tokenForStaffUser({ tenantId, businessType, userId, email }) {
   return signToken({ sub: userId, tenant_id: tenantId, business_type: businessType, role: 'tenant_staff', nombre: 'QA Staff', email });
 }
 
@@ -76,7 +76,7 @@ async function main() {
   const staffUserId = db
     .prepare("INSERT INTO users (tenant_id, business_type, email, password_hash, nombre, role) VALUES (?, 'carwash', ?, 'x', 'QA Staff', 'tenant_staff')")
     .run(carwashA.tenantId, `staff-${Date.now()}@qa-ai-chat.test`).lastInsertRowid;
-  const staffToken = tokenForStaffUser({ tenantId: carwashA.tenantId, businessType: 'carwash', userId: staffUserId, email: 'staff' });
+  const staffToken = await tokenForStaffUser({ tenantId: carwashA.tenantId, businessType: 'carwash', userId: staffUserId, email: 'staff' });
   const clienteCarwash = db.prepare('INSERT INTO carwash_clientes (tenant_id, nombre) VALUES (?, ?)').run(carwashA.tenantId, 'Cliente Carwash A').lastInsertRowid;
   const membresiaCarwash = db
     .prepare(

@@ -1,7 +1,7 @@
 const db = require('../db');
 
-function activeTenant(tenantId, businessType) {
-  return db.prepare("SELECT id FROM tenants WHERE id = ? AND business_type = ? AND status IN ('activo', 'trial')").get(tenantId, businessType);
+async function activeTenant(tenantId, businessType) {
+  return await db.prepare("SELECT id FROM tenants WHERE id = ? AND business_type = ? AND status IN ('activo', 'trial')").get(tenantId, businessType);
 }
 
 function requireAdmin(req, res, next) {

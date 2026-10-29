@@ -63,12 +63,12 @@ router.post('/confirm', aiLimiter, async (req, res, next) => {
   }
 });
 
-router.post('/cancel', aiLimiter, (req, res, next) => {
+router.post('/cancel', aiLimiter, async (req, res, next) => {
   try {
     const context = contextFromRequest(req);
     const { actionId } = req.body || {};
     if (!actionId) return res.status(400).json({ error: 'Falta actionId' });
-    const result = chatService.cancelAndReply({ context, actionId });
+    const result = await chatService.cancelAndReply({ context, actionId });
     if (result.type === 'error') return res.status(404).json({ error: result.message });
     res.json(result);
   } catch (err) {

@@ -3,16 +3,16 @@ const db = require('../src/db');
 const { signToken } = require('../src/middleware/auth');
 const base = process.env.API_URL;
 if (!base || process.env.NODE_ENV !== 'test') throw new Error('Run through npm test');
-const tenant = db.prepare("SELECT * FROM tenants WHERE business_type='taller' LIMIT 1").get();
-const admin = db.prepare("SELECT * FROM users WHERE tenant_id=? AND role='tenant_admin' LIMIT 1").get(tenant.id);
-const staffId = db.prepare("INSERT INTO users(tenant_id,business_type,email,password_hash,nombre,role) VALUES (?,'taller','staff-release@test','x','QA','tenant_staff')").run(tenant.id).lastInsertRowid;
-const token = role => signToken({sub:role==='admin'?admin.id:staffId,tenant_id:tenant.id,business_type:'taller',role:role==='admin'?'tenant_admin':'tenant_staff'});
-const adminToken=token('admin'), staffToken=token('staff');
 const headers=t=>({'Content-Type':'application/json',Authorization:'Bearer '+t});
 async function req(path,method,t,body){const r=await fetch(base+path,{method,headers:headers(t),body:body?JSON.stringify(body):undefined});return {status:r.status,body:r.status===204?null:await r.json()};}
 (async()=>{
  let checks=0;
  const check=(actual,expected)=>{assert.equal(actual,expected);checks++;};
+ const tenant = await db.prepare("SELECT * FROM tenants WHERE business_type='taller' LIMIT 1").get();
+ const admin = await db.prepare("SELECT * FROM users WHERE tenant_id=? AND role='tenant_admin' LIMIT 1").get(tenant.id);
+ const staffId = (await db.prepare("INSERT INTO users(tenant_id,business_type,email,password_hash,nombre,role) VALUES (?,'taller','staff-release@test','x','QA','tenant_staff')").run(tenant.id)).lastInsertRowid;
+ const token = role => signToken({sub:role==='admin'?admin.id:staffId,tenant_id:tenant.id,business_type:'taller',role:role==='admin'?'tenant_admin':'tenant_staff'});
+ const adminToken=await token('admin'), staffToken=await token('staff');
  const created=await req('/taller/clientes','POST',adminToken,{nombre:'Release customer'});check(created.status,201);
  check((await req('/taller/clientes/'+created.body.id,'DELETE',staffToken)).status,403);
  check((await req('/taller/inventario','POST',staffToken,{nombre:'Forbidden',precio:1,stock:2})).status,403);

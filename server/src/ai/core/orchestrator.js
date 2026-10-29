@@ -27,18 +27,18 @@ function actionAge(action) {
   return Date.now() - new Date(action.created_at.replace(' ', 'T') + 'Z').getTime();
 }
 
-function proposeToolCall({ conversationId, context, toolName, args, idempotencyKey = null }) {
+async function proposeToolCall({ conversationId, context, toolName, args, idempotencyKey = null }) {
   const tool = getTool(toolName);
   if (!tool) return { success: false, code: 'TOOL_NOT_FOUND', message: `Herramienta desconocida: ${toolName}` };
 
-  const conversation = history.getConversation(conversationId, context.tenantId);
+  const conversation = await history.getConversation(conversationId, context.tenantId);
   if (!conversation) return { success: false, code: 'CONVERSATION_NOT_FOUND', message: 'Conversación no encontrada para este tenant' };
 
   // Idempotencia: mismo tool + misma idempotencyKey en la misma
   // conversación no se procesa dos veces (reintentos, webhook duplicado,
   // doble tap del usuario).
   if (idempotencyKey) {
-    const existing = history.findExistingAction(conversationId, context.tenantId, toolName, idempotencyKey);
+    const existing = await history.findExistingAction(conversationId, context.tenantId, toolName, idempotencyKey);
     if (existing?.status === 'executed') {
       return { success: true, deduplicated: true, actionId: existing.id, data: existing.result ? JSON.parse(existing.result) : null };
     }
@@ -48,8 +48,8 @@ function proposeToolCall({ conversationId, context, toolName, args, idempotencyK
   }
 
   if (!tool.requiresConfirmation) {
-    const result = runTool(toolName, context, args);
-    const action = history.createAction({
+    const result = await runTool(toolName, context, args);
+    const action = await history.createAction({
       conversationId,
       tenantId: context.tenantId,
       toolName,
@@ -57,16 +57,16 @@ function proposeToolCall({ conversationId, context, toolName, args, idempotencyK
       idempotencyKey,
       status: result.success ? 'executed' : 'failed',
     });
-    history.updateActionStatus(action.id, context.tenantId, action.status, result);
+    await history.updateActionStatus(action.id, context.tenantId, action.status, result);
     return { ...result, actionId: action.id };
   }
 
   // Se valida (rubro + permiso + forma de los argumentos) ANTES de pedir
   // confirmación, para no confirmar algo que de todas formas iba a fallar.
-  const auth = authorize(toolName, context, args);
+  const auth = await authorize(toolName, context, args);
   if (!auth.ok) return auth.result;
 
-  const action = history.createAction({
+  const action = await history.createAction({
     conversationId,
     tenantId: context.tenantId,
     toolName,
@@ -82,35 +82,35 @@ function proposeToolCall({ conversationId, context, toolName, args, idempotencyK
  * quedaron guardados en ai_actions al proponerla — el parámetro `args` de
  * quien llama a proposeToolCall() no puede reaparecer aquí con otro valor.
  */
-function confirmInTransaction({ actionId, context }) {
-  const action = history.getAction(actionId, context.tenantId);
+async function confirmInTransaction({ actionId, context }) {
+  const action = await history.getAction(actionId, context.tenantId);
   if (!action) return { success: false, code: 'ACTION_NOT_FOUND', message: 'Acción no encontrada para este tenant' };
   if (action.status !== 'pending_confirmation') {
     return { success: false, code: 'ACTION_NOT_PENDING', message: `Esta acción ya está en estado "${action.status}"` };
   }
   if (actionAge(action) > PENDING_ACTION_TTL_MS) {
-    history.updateActionStatus(action.id, context.tenantId, 'expired');
+    await history.updateActionStatus(action.id, context.tenantId, 'expired');
     return { success: false, code: 'ACTION_EXPIRED', message: 'La confirmación expiró, vuelve a pedir la acción' };
   }
 
   const storedArgs = JSON.parse(action.arguments || '{}');
-  const result = runTool(action.tool_name, context, storedArgs);
-  history.updateActionStatus(action.id, context.tenantId, result.success ? 'executed' : 'failed', result);
+  const result = await runTool(action.tool_name, context, storedArgs);
+  await history.updateActionStatus(action.id, context.tenantId, result.success ? 'executed' : 'failed', result);
   return { ...result, actionId: action.id };
 }
 
-function confirmToolCall(args) {
+async function confirmToolCall(args) {
   // Business writes and the authoritative action result commit together.
-  return db.transaction(() => confirmInTransaction(args)).immediate();
+  return db.transaction(async () => confirmInTransaction(args)).immediate();
 }
 
-function rejectToolCall({ actionId, context }) {
-  const action = history.getAction(actionId, context.tenantId);
+async function rejectToolCall({ actionId, context }) {
+  const action = await history.getAction(actionId, context.tenantId);
   if (!action) return { success: false, code: 'ACTION_NOT_FOUND', message: 'Acción no encontrada para este tenant' };
   if (action.status !== 'pending_confirmation') {
     return { success: false, code: 'ACTION_NOT_PENDING', message: `Esta acción ya está en estado "${action.status}"` };
   }
-  history.updateActionStatus(action.id, context.tenantId, 'rejected');
+  await history.updateActionStatus(action.id, context.tenantId, 'rejected');
   return { success: true, actionId: action.id };
 }
 

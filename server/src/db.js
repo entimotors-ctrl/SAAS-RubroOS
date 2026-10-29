@@ -258,5 +258,46 @@ CREATE TABLE IF NOT EXISTS whatsapp_inbound_events (
 
 require('./db/migrations').migrate(db, dbPath);
 
+// better-sqlite3 rechaza explícitamente un callback async en su propio
+// db.transaction() ("Transaction function cannot return a promise"), pero la
+// Fase 2 de la migración a Postgres (ver docs/MIGRACION-SUPABASE-POSTGRES.md)
+// vuelve async la capa de negocio archivo por archivo, incluidos los
+// callbacks de transacción. Para que esa conversión pueda hacerse de forma
+// incremental (sin tener que tocar los ~20 archivos que usan
+// db.transaction() en la misma pasada), se detecta si el callback es async:
+// uno síncrono sigue yendo al db.transaction() nativo de better-sqlite3 TAL
+// CUAL (cero cambio de comportamiento para lo que no se ha convertido
+// todavía); uno async usa un wrapper propio con BEGIN/COMMIT/ROLLBACK
+// crudos, porque better-sqlite3 no lo acepta. `depth` evita un BEGIN anidado
+// cuando una transacción llama a otra: como esta conexión es única (no hay
+// pool) y JS es de un solo hilo, mientras cada `await` dentro del callback
+// resuelva un valor ya síncrono (nunca I/O real) el microtask queue se vacía
+// antes de que cualquier otra petición HTTP pueda intercalarse — no usar
+// `db.transaction` para esperar una llamada de red real.
+const nativeTransaction = db.transaction.bind(db);
+let depth = 0;
+function asyncSqliteTransaction(fn) {
+  async function run() {
+    if (depth > 0) { depth += 1; try { return await fn(); } finally { depth -= 1; } }
+    depth = 1;
+    db.exec('BEGIN');
+    try {
+      const result = await fn();
+      db.exec('COMMIT');
+      return result;
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch { /* ya sin transacción abierta */ }
+      throw e;
+    } finally {
+      depth = 0;
+    }
+  }
+  run.immediate = run;
+  run.deferred = run;
+  run.exclusive = run;
+  return run;
+}
+db.transaction = (fn) => (fn.constructor.name === 'AsyncFunction' ? asyncSqliteTransaction(fn) : nativeTransaction(fn));
+
 require('./services/businessClock').install(db);
 module.exports = db;

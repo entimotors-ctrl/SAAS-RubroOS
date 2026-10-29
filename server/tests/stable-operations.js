@@ -1,14 +1,15 @@
 const assert=require('node:assert/strict'),db=require('../src/db'),{signToken}=require('../src/middleware/auth');
 if(process.env.NODE_ENV!=='test'||!process.env.API_URL)throw Error('Use isolated runner');
 let n=0;const check=(a,b)=>{assert.deepEqual(a,b);n++;};
-const users={},tokens={};for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');users[type]=u;tokens[type]=signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
-const owner=db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=signToken({sub:owner.id,role:'owner'});
+const users={},tokens={};
 async function req(type,path,method='GET',body){const r=await fetch(process.env.API_URL+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+tokens[type]},body:body===undefined?undefined:JSON.stringify(body)});const t=await r.text();let value;try{value=JSON.parse(t);}catch{value=t;}return {status:r.status,body:value};}
 (async()=>{
+ for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');users[type]=u;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
+ const owner=db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=await signToken({sub:owner.id,role:'owner'});
  check((await req('owner','/ready')).status,200);
  check((await req('owner','/owner/system')).body.backups.enabled,false);
  const staffid=db.prepare("INSERT INTO users(tenant_id,business_type,email,password_hash,nombre,role) VALUES(?,?,?,?,?,'tenant_staff')").run(users.agro.tenant_id,'agro','stable-staff@test.example',users.agro.password_hash,'Staff').lastInsertRowid;
- tokens.staff=signToken({sub:staffid,tenant_id:users.agro.tenant_id,business_type:'agro',role:'tenant_staff'});
+ tokens.staff=await signToken({sub:staffid,tenant_id:users.agro.tenant_id,business_type:'agro',role:'tenant_staff'});
  check((await req('staff','/operations/settings','PUT',{fumigacion:1})).status,403);
  check((await req('staff','/operations/export')).status,403);
  check((await req('agro','/operations/settings','PUT',{timezone:'Bad/Zone'})).status,400);
