@@ -3,6 +3,7 @@ const db = require('../db');
 const { ServiceError } = require('../services/errors');
 const { sendMessage } = require('./adapter');
 const { normalizePhoneNumber } = require('./identityResolver');
+const dbAccess = require('../security/dbAccess');
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutos
 
@@ -47,9 +48,13 @@ async function initiateLink({ tenantId, userId, phoneNumberRaw }) {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (!phoneNumberId) throw new ServiceError('WhatsApp no está configurado en este servidor todavía', 503);
 
-  const activeElsewhere = await db
-    .prepare("SELECT id FROM whatsapp_identities WHERE phone_number = ? AND status = 'active' AND tenant_id != ?")
-    .get(phoneNumber, tenantId);
+  // asSystem a propósito: esta es la ÚNICA consulta de todo el flujo de
+  // vinculación que necesita ver a través de tenants (comprobar que el
+  // número no esté ya activo en OTRO negocio) — todo lo demás en esta
+  // función corre bajo el contexto normal del tenant que llama.
+  const activeElsewhere = await dbAccess.asSystem(() =>
+    db.prepare("SELECT id FROM whatsapp_identities WHERE phone_number = ? AND status = 'active' AND tenant_id != ?").get(phoneNumber, tenantId)
+  );
   if (activeElsewhere) throw new ServiceError('Este número ya está vinculado a otro negocio de RubroOS', 409);
 
   const code = generateCode();

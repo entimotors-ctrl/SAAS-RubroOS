@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { AsyncLocalStorage } = require('async_hooks');
 const { Pool, types } = require('pg');
+const dbAccess = require('../security/dbAccess');
 
 // `pg` devuelve BIGINT y NUMERIC como string por defecto (para no perder
 // precisión en valores fuera de rango). better-sqlite3 siempre devolvía
@@ -56,9 +57,99 @@ const TABLES_WITHOUT_ID = new Set([
 // fecha-hora "naive" (sin offset) a timestamptz. Si la sesión usara otro
 // TimeZone, Postgres interpretaría esos strings naive con esa zona en vez de
 // UTC y el resultado no coincidiría con el lado SQLite/JS.
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: /sslmode=require/.test(process.env.DATABASE_URL || '') ? true : undefined, options: '-c TimeZone=UTC' });
+function poolFor(connectionString) {
+  return new Pool({ connectionString, ssl: /sslmode=require/.test(connectionString || '') ? true : undefined, options: '-c TimeZone=UTC' });
+}
+const pool = poolFor(process.env.DATABASE_URL);
+// DATABASE_ADMIN_URL (opcional): conexión con privilegios para el bootstrap
+// (crear/alterar el rol de la app, aplicar supabase/migrations/). Sin ella,
+// el bootstrap reutiliza el mismo `pool` — conveniente para desarrollo local,
+// pero entonces `DATABASE_URL` debe ser ya un rol con permisos de owner/DDL.
+// En producción, `DATABASE_URL` debe ser el rol restringido de la Fase 3
+// (ver ensureAppRole) y `DATABASE_ADMIN_URL` el rol administrador real.
+const adminPool = process.env.DATABASE_ADMIN_URL ? poolFor(process.env.DATABASE_ADMIN_URL) : pool;
 const txContext = new AsyncLocalStorage();
-function client() { return txContext.getStore() || pool; }
+
+const ROLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/**
+ * Fase 3 (RLS): crea o sincroniza (idempotente) el rol de Postgres que usa
+ * `DATABASE_URL` — sin privilegios de superusuario/owner/BYPASSRLS, para que
+ * las políticas RLS de 20261027140010_rls.sql realmente apliquen — y le
+ * otorga el mínimo necesario (USAGE del esquema + CRUD en cada tabla; nunca
+ * DDL). El nombre de rol y la contraseña salen de `DATABASE_URL` mismo: no
+ * hay credenciales nuevas que inventar ni guardar en ningún archivo.
+ */
+async function ensureAppRole(adminConn, databaseUrl) {
+  const url = new URL(databaseUrl);
+  const appUser = decodeURIComponent(url.username || '');
+  const appPassword = decodeURIComponent(url.password || '');
+  if (!ROLE_NAME_PATTERN.test(appUser)) throw new Error(`DATABASE_URL tiene un nombre de usuario/rol inválido: "${appUser}"`);
+  // CREATE ROLE/ALTER ROLE no aceptan parámetros ($1) en la cláusula PASSWORD
+  // (son sentencias de utilidad, no DML) — se escapa a mano como literal SQL.
+  // appUser/appPassword salen de DATABASE_URL (un secreto de despliegue, no
+  // entrada de un usuario final), y appUser ya se validó contra ROLE_NAME_PATTERN.
+  const passwordLiteral = `'${appPassword.replace(/'/g, "''")}'`;
+  const { rows } = await adminConn.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [appUser]);
+  if (!rows.length) {
+    await adminConn.query(`CREATE ROLE "${appUser}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD ${passwordLiteral}`);
+  } else {
+    // Solo la contraseña: re-afirmar NOSUPERUSER/etc. en un rol que ya los
+    // tiene no debería hacer falta, y algunos Postgres gestionados (p. ej. el
+    // propio de Supabase, vía su extensión supautils) bloquean un ALTER ROLE
+    // que toque esas banderas salvo que la conexión sea el superusuario real
+    // del clúster (que ni siquiera en Supabase lo es "postgres").
+    await adminConn.query(`ALTER ROLE "${appUser}" WITH LOGIN PASSWORD ${passwordLiteral}`);
+  }
+  await adminConn.query(`GRANT USAGE ON SCHEMA public TO "${appUser}"`);
+  const { rows: tables } = await adminConn.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'");
+  for (const { tablename } of tables) {
+    await adminConn.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "${tablename}" TO "${appUser}"`);
+  }
+}
+
+/** Si el rol que usa `pool` puede saltarse RLS (superusuario, BYPASSRLS, o dueño de las tablas), las políticas de 20261027140010_rls.sql no protegen nada de verdad — avisa fuerte en el log en vez de fallar en silencio. */
+async function warnIfRlsBypassed() {
+  try {
+    const { rows } = await pool.query(
+      "SELECT rolsuper, rolbypassrls, (SELECT rolname FROM pg_roles WHERE oid = (SELECT relowner FROM pg_class WHERE relname = 'tenants')) AS table_owner, current_user AS me FROM pg_roles WHERE rolname = current_user"
+    );
+    const info = rows[0];
+    if (info && (info.rolsuper || info.rolbypassrls || info.table_owner === info.me)) {
+      console.warn(
+        `[rls] ADVERTENCIA: el rol de conexión de la app ("${info.me}") puede saltarse RLS ` +
+          `(superusuario, BYPASSRLS, o dueño de las tablas) — las políticas de aislamiento por ` +
+          `tenant de supabase/migrations/20261027140010_rls.sql NO se están aplicando de verdad. ` +
+          'Usa un rol de aplicación restringido en cualquier entorno real (ver docs/MIGRACION-SUPABASE-POSTGRES.md).'
+      );
+    }
+  } catch {
+    // No bloquea el arranque por esto — es un diagnóstico, no una verificación de seguridad en sí.
+  }
+}
+
+/**
+ * Traduce el contexto de acceso (server/src/security/dbAccess.js) a session
+ * vars de Postgres que las políticas RLS verifican. Exige que exista un
+ * contexto — sin esto, un bug que olvide requireAuth/requireTenant, o un
+ * script nuevo que no se haya adaptado, fallaría agregando IMPORTANTE: con
+ * un error claro en el log, no con un resultado vacío silencioso.
+ */
+async function applyAccessContext(conn) {
+  const ctx = dbAccess.current();
+  if (!ctx) {
+    throw new Error(
+      'Consulta a la base sin contexto de acceso (tenant/owner/sistema) establecido — ' +
+        'ver server/src/security/dbAccess.js. Esto es a propósito: Postgres con RLS deniega ' +
+        'todo por defecto si no sabe de qué tenant es la operación.'
+    );
+  }
+  if (ctx.owner || ctx.system) {
+    await conn.query("SELECT set_config('app.bypass_rls', 'true', true)");
+  } else {
+    await conn.query("SELECT set_config('app.tenant_id', $1, true)", [String(ctx.tenantId)]);
+  }
+}
 
 function translateSql(sql) {
   // datetime('now') (SQLite) -> now() (Postgres). Único reemplazo de función
@@ -86,8 +177,30 @@ function prepare(rawSql) {
   const isInsertWithId = / RETURNING id$/.test(translated);
   async function exec(params) {
     await ready; // el bootstrap de esquema (ensureSchema) debe terminar antes de la primera consulta real.
-    const res = await client().query(translated, params);
-    return res;
+    const outer = txContext.getStore();
+    if (outer) {
+      // Ya estamos dentro de una transacción explícita (db.transaction(fn)):
+      // el contexto de acceso para RLS ya se aplicó una sola vez al abrir esa
+      // transacción (ver runTransaction) — reutilizar la misma conexión.
+      return outer.query(translated, params);
+    }
+    // Llamada suelta (sin transacción explícita de la app): cada una abre su
+    // propia mini-transacción SOLO para que `SET LOCAL` (el contexto de
+    // acceso que las políticas RLS verifican) aplique de forma segura sin
+    // importar qué conexión del pool le toque — ver applyAccessContext.
+    const conn = await pool.connect();
+    try {
+      await conn.query('BEGIN');
+      await applyAccessContext(conn);
+      const res = await conn.query(translated, params);
+      await conn.query('COMMIT');
+      return res;
+    } catch (e) {
+      await conn.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      conn.release();
+    }
   }
   return {
     async get(...params) {
@@ -114,6 +227,7 @@ async function runTransaction(fn) {
   const conn = await pool.connect();
   try {
     await conn.query('BEGIN');
+    await applyAccessContext(conn); // una sola vez: las llamadas anidadas reutilizan esta misma conexión/transacción.
     const result = await txContext.run(conn, fn);
     await conn.query('COMMIT');
     return result;
@@ -137,18 +251,21 @@ function transaction(fn) {
 }
 
 async function ensureSchema() {
-  const { rows } = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='tenants'");
-  if (rows.length) return;
-  const dir = process.env.MIGRATIONS_DIR || path.join(__dirname, '..', '..', '..', 'supabase', 'migrations');
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
-  const conn = await pool.connect();
-  try {
-    for (const file of files) {
-      await conn.query(fs.readFileSync(path.join(dir, file), 'utf8'));
+  const { rows } = await adminPool.query("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='tenants'");
+  if (!rows.length) {
+    const dir = process.env.MIGRATIONS_DIR || path.join(__dirname, '..', '..', '..', 'supabase', 'migrations');
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+    const conn = await adminPool.connect();
+    try {
+      for (const file of files) {
+        await conn.query(fs.readFileSync(path.join(dir, file), 'utf8'));
+      }
+      await ensureAppRole(conn, process.env.DATABASE_URL);
+    } finally {
+      conn.release();
     }
-  } finally {
-    conn.release();
   }
+  await warnIfRlsBypassed();
 }
 
 const ready = ensureSchema();
@@ -158,6 +275,6 @@ module.exports = {
   transaction,
   ready,
   close() {
-    return pool.end();
+    return Promise.all([pool.end(), ...(adminPool !== pool ? [adminPool.end()] : [])]);
   },
 };

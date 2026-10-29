@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const db = require('./db');
+const dbAccess = require('./security/dbAccess');
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL || 'stwinkidoo@gmail.com';
 const OWNER_PASSWORD = process.env.OWNER_SEED_PASSWORD;
@@ -109,7 +110,14 @@ async function seedCarwash(tenantId) {
   await db.prepare("INSERT INTO carwash_turnos (tenant_id, cliente_id, vehiculo_id, servicio_id, estado, usa_membresia, precio) VALUES (?,?,?,?,'en_cola',1,0)").run(tenantId, cliente.lastInsertRowid, vehiculo.lastInsertRowid, s2.lastInsertRowid);
 }
 
+// Siembra administrativa de arranque: crea la cuenta owner y (fuera de
+// producción) varios tenants demo — por diseño cruza tenants, así que corre
+// bajo asSystem de principio a fin.
 async function ensureSeed() {
+  return dbAccess.asSystem(() => ensureSeedInternal());
+}
+
+async function ensureSeedInternal() {
   const yaSembrado = (await db.prepare('SELECT COUNT(*) AS n FROM tenants').get()).n > 0;
   const ownerExiste = await db.prepare("SELECT 1 FROM users WHERE role = 'owner' LIMIT 1").get();
 

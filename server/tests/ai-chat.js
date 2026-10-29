@@ -13,6 +13,7 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 const db = require('../src/db');
+const dbAccess = require('../src/security/dbAccess');
 const { signToken } = require('../src/middleware/auth');
 
 const BASE = process.env.API_URL || 'http://localhost:4000/api';
@@ -204,7 +205,7 @@ async function main() {
   if (fail > 0) process.exit(1);
 }
 
-main().catch((err) => {
+dbAccess.asSystem(main).catch((err) => {
   console.error('Error ejecutando la prueba:', err);
   process.exit(1);
 });

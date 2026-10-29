@@ -5,8 +5,9 @@ const assert = require('node:assert/strict');
 const db = require('../src/db');
 const history = require('../src/ai/core/history');
 const { tryHandle } = require('../src/whatsapp/confirmationIntent');
+const dbAccess = require('../src/security/dbAccess');
 
-(async () => {
+dbAccess.asSystem(async () => {
   const tenantId = Number((await db.prepare("INSERT INTO tenants (business_type, nombre_empresa, slug) VALUES ('taller', 'Regression', 'regression')").run()).lastInsertRowid);
   const context = { tenantId, businessType: 'taller', role: 'tenant_admin' };
   const conversation = await history.createConversation({ tenantId, channel: 'whatsapp' });
@@ -31,4 +32,4 @@ const { tryHandle } = require('../src/whatsapp/confirmationIntent');
     checks++;
   }
   console.log(`${checks}/${checks} checks OK`);
-})().catch(err => { console.error(err); process.exitCode = 1; }).finally(() => db.close());
+}).catch(err => { console.error(err); process.exitCode = 1; }).finally(() => db.close());

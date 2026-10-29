@@ -1,9 +1,9 @@
-const assert=require('node:assert/strict'),db=require('../src/db'),{signToken}=require('../src/middleware/auth');
+const assert=require('node:assert/strict'),db=require('../src/db'),{signToken}=require('../src/middleware/auth'),dbAccess=require('../src/security/dbAccess');
 if(process.env.NODE_ENV!=='test'||!process.env.API_URL)throw Error('Use isolated runner');
 let n=0;const check=(a,b)=>{assert.deepEqual(a,b);n++;};
 const users={},tokens={};
 async function req(type,path,method='GET',body){const r=await fetch(process.env.API_URL+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+tokens[type]},body:body===undefined?undefined:JSON.stringify(body)});const t=await r.text();let value;try{value=JSON.parse(t);}catch{value=t;}return {status:r.status,body:value};}
-(async()=>{
+dbAccess.asSystem(async()=>{
  for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=await db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');users[type]=u;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
  const owner=await db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=await signToken({sub:owner.id,role:'owner'});
  check((await req('owner','/ready')).status,200);
@@ -75,4 +75,4 @@ async function req(type,path,method='GET',body){const r=await fetch(process.env.
  try{const backups=require('../src/maintenance/backups');for(let i=0;i<3;i++)await backups.backup(db,folder,2);const names=fs.readdirSync(folder);check(names.length,2);const copy=new Database(path.join(folder,names[0]),{readonly:true});check(copy.pragma('quick_check',{simple:true}),'ok');check(copy.prepare('SELECT COUNT(*) n FROM users').get().n,(await db.prepare('SELECT COUNT(*) n FROM users').get()).n);copy.close();const restore=require('../src/maintenance/restore');const restored=path.join(folder,'restored.db');await restore(path.join(folder,names[0]),restored);const rd=new Database(restored,{readonly:true});check(rd.prepare('SELECT COUNT(*) n FROM users').get().n,(await db.prepare('SELECT COUNT(*) n FROM users').get()).n);rd.close();await assert.rejects(()=>restore(path.join(folder,names[0]),restored),/destino ya existe/);n++;const corrupt=path.join(folder,'corrupt.db');fs.writeFileSync(corrupt,'invalid database');await assert.rejects(()=>restore(corrupt,path.join(folder,'bad.db')));n++;check(fs.existsSync(path.join(folder,'bad.db')),false);}finally{fs.rmSync(folder,{recursive:true,force:true});}
  }
  console.log(`${n}/${n} checks OK`);
-})().catch(e=>{console.error(e);process.exitCode=1;});
+}).catch(e=>{console.error(e);process.exitCode=1;});

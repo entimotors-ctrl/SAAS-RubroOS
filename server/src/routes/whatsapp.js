@@ -8,6 +8,7 @@ const confirmationIntent = require('../whatsapp/confirmationIntent');
 const { buildContext } = require('../ai/core/context');
 const chatService = require('../ai/core/chatService');
 const history = require('../ai/core/history');
+const dbAccess = require('../security/dbAccess');
 
 const router = express.Router();
 
@@ -46,10 +47,19 @@ router.get('/webhook', (req, res) => {
   return res.sendStatus(403);
 });
 
-/** INSERT que falla por message_id duplicado = ya se vio este wamid, no procesar de nuevo. */
+/**
+ * INSERT que falla por message_id duplicado = ya se vio este wamid, no
+ * procesar de nuevo. Siempre bajo asSystem (no bajo lo que sea que el
+ * llamador tenga ambiente): whatsapp_inbound_events es solo un libro de
+ * idempotencia de Meta, sin RLS por tenant (ver supabase/migrations/
+ * 20261027140010_rls.sql) — se llama tanto antes de resolver identidad
+ * (claimMessage) como después (markEvent, ya dentro de un contexto de
+ * tenant real), y en los dos casos debe tocar la misma fila sin que RLS
+ * la bloquee.
+ */
 async function claimMessage(messageId) {
   try {
-    await db.prepare('INSERT INTO whatsapp_inbound_events (message_id) VALUES (?)').run(messageId);
+    await dbAccess.asSystem(() => db.prepare('INSERT INTO whatsapp_inbound_events (message_id) VALUES (?)').run(messageId));
     return true;
   } catch {
     return false;
@@ -57,10 +67,12 @@ async function claimMessage(messageId) {
 }
 
 async function markEvent(messageId, status, tenantId) {
-  await db.prepare("UPDATE whatsapp_inbound_events SET status = ?, tenant_id = COALESCE(?, tenant_id), updated_at = datetime('now') WHERE message_id = ?").run(
-    status,
-    tenantId || null,
-    messageId
+  await dbAccess.asSystem(() =>
+    db.prepare("UPDATE whatsapp_inbound_events SET status = ?, tenant_id = COALESCE(?, tenant_id), updated_at = datetime('now') WHERE message_id = ?").run(
+      status,
+      tenantId || null,
+      messageId
+    )
   );
 }
 
@@ -117,20 +129,25 @@ async function processEvent(evt) {
     return;
   }
 
-  if (evt.type !== 'text') {
-    await replyText(evt.from, 'Por ahora solo puedo leer mensajes de texto. Escríbeme lo que necesitas y con gusto te ayudo.');
-    await markEvent(evt.messageId, 'done', identity.tenantId);
-    return;
-  }
+  // De aquí en adelante SÍ se sabe el tenant — todo lo que sigue (la lógica
+  // de negocio real: tools, ventas, confirmaciones) corre bajo ese contexto,
+  // no bajo el bypass de sistema de arriba.
+  return dbAccess.asTenant(identity.tenantId, async () => {
+    if (evt.type !== 'text') {
+      await replyText(evt.from, 'Por ahora solo puedo leer mensajes de texto. Escríbeme lo que necesitas y con gusto te ayudo.');
+      await markEvent(evt.messageId, 'done', identity.tenantId);
+      return;
+    }
 
-  try {
-    await processTextMessage(evt, identity);
-    await markEvent(evt.messageId, 'done', identity.tenantId);
-  } catch (err) {
-    console.error('[whatsapp] error procesando mensaje:', err?.message || err);
-    await markEvent(evt.messageId, 'failed', identity.tenantId);
-    await replyText(evt.from, 'No pude procesar tu solicitud en este momento.');
-  }
+    try {
+      await processTextMessage(evt, identity);
+      await markEvent(evt.messageId, 'done', identity.tenantId);
+    } catch (err) {
+      console.error('[whatsapp] error procesando mensaje:', err?.message || err);
+      await markEvent(evt.messageId, 'failed', identity.tenantId);
+      await replyText(evt.from, 'No pude procesar tu solicitud en este momento.');
+    }
+  });
 }
 
 router.post('/webhook', async (req, res) => {

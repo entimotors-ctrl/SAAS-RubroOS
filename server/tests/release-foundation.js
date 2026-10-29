@@ -3,6 +3,7 @@ process.env.DATABASE_PATH = ':memory:';
 process.env.JWT_SECRET = 'release-foundation-tests-only';
 const assert = require('node:assert/strict');
 const db = require('../src/db');
+const dbAccess = require('../src/security/dbAccess');
 const sales = require('../src/services/tallerSales');
 const orders = require('../src/services/tallerOrders');
 const appointments = require('../src/services/barberiaAppointments');
@@ -21,7 +22,7 @@ function invoke(mw, token, user) {
   const res={status(n){result.status=n;return this;},json(body){result.body=body;return this;}};
   return Promise.resolve(mw(req,res,()=>{result.next=true;})).then(()=>({...result,user:req.user}));
 }
-(async () => {
+dbAccess.asSystem(async () => {
 const tid = Number((await db.prepare("INSERT INTO tenants(business_type,nombre_empresa,slug,status) VALUES ('taller','Test','test','activo')").run()).lastInsertRowid);
 const other = Number((await db.prepare("INSERT INTO tenants(business_type,nombre_empresa,slug,status) VALUES ('taller','Other','other','activo')").run()).lastInsertRowid);
 const uid = Number((await db.prepare("INSERT INTO users(tenant_id,business_type,email,password_hash,nombre,role) VALUES (?,'taller','test@local','x','Test','tenant_admin')").run(tid)).lastInsertRowid);
@@ -146,4 +147,4 @@ try {
   if (!process.env.DATABASE_URL) await test('Migration is repeatable',async ()=>{require('../src/db/migrations').migrate(db,':memory:');assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).n,7);});
   console.log(`\n${passed}/${passed} checks OK`);
 } finally { db.close(); }
-})().catch(e=>{console.error(e);process.exitCode=1;});
+}).catch(e=>{console.error(e);process.exitCode=1;});

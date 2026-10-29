@@ -11,6 +11,7 @@ const helmet = require('helmet');
 
 const { BUSINESS_TYPES } = require('./business-types');
 const { requireAuth, requireOwner, requireTenant, requireBusinessType } = require('./middleware/auth');
+const dbAccess = require('./security/dbAccess');
 
 const authRoutes = require('./routes/auth');
 const ownerRoutes = require('./routes/owner');
@@ -42,7 +43,7 @@ app.use(cors({ origin: corsOrigins }));
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, name: 'RubroOS API' }));
-app.get('/api/ready',async(req,res)=>{try{await db.prepare('SELECT 1').get();res.json({ok:true});}catch{res.status(503).json({ok:false});}});
+app.get('/api/ready',async(req,res)=>{try{await dbAccess.asSystem(()=>db.prepare('SELECT 1').get());res.json({ok:true});}catch{res.status(503).json({ok:false});}});
 app.get('/api/business-types', (req, res) => res.json(BUSINESS_TYPES));
 
 app.use('/api/auth', authRoutes);

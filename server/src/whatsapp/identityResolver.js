@@ -1,4 +1,5 @@
 const db = require('../db');
+const dbAccess = require('../security/dbAccess');
 
 const UNKNOWN_NUMBER_MESSAGE = 'No encuentro este número asociado a un negocio de RubroOS. Contacta al administrador.';
 
@@ -18,19 +19,23 @@ async function resolve({ phoneNumberId, from }) {
   const phoneNumber = normalizePhoneNumber(from);
   if (!phoneNumberId || !phoneNumber) return null;
 
-  // Los alias camelCase van entre comillas dobles: sin comillas, Postgres los
-  // pliega a minúsculas (tenantid, no tenantId) y el código de arriba que lee
-  // identity.tenantId/businessType se rompería en silencio.
-  const row = await db
-    .prepare(
-      `SELECT wi.tenant_id AS "tenantId", wi.user_id AS "userId", u.role AS role, u.business_type AS "businessType"
-       FROM whatsapp_identities wi
-       JOIN users u ON u.id = wi.user_id AND u.tenant_id = wi.tenant_id
-       JOIN tenants t ON t.id = wi.tenant_id AND t.business_type = u.business_type
-         AND t.status IN ('activo', 'trial')
-       WHERE u.role='tenant_admin' AND u.access_status='activo' AND wi.phone_number_id = ? AND wi.phone_number = ? AND wi.status = 'active'`
-    )
-    .get(phoneNumberId, phoneNumber);
+  // asSystem: por definición esta consulta determina A QUÉ tenant pertenece
+  // el número — no hay un tenant_id previo por el cual filtrar.
+  const row = await dbAccess.asSystem(() =>
+    // Los alias camelCase van entre comillas dobles: sin comillas, Postgres los
+    // pliega a minúsculas (tenantid, no tenantId) y el código de arriba que lee
+    // identity.tenantId/businessType se rompería en silencio.
+    db
+      .prepare(
+        `SELECT wi.tenant_id AS "tenantId", wi.user_id AS "userId", u.role AS role, u.business_type AS "businessType"
+         FROM whatsapp_identities wi
+         JOIN users u ON u.id = wi.user_id AND u.tenant_id = wi.tenant_id
+         JOIN tenants t ON t.id = wi.tenant_id AND t.business_type = u.business_type
+           AND t.status IN ('activo', 'trial')
+         WHERE u.role='tenant_admin' AND u.access_status='activo' AND wi.phone_number_id = ? AND wi.phone_number = ? AND wi.status = 'active'`
+      )
+      .get(phoneNumberId, phoneNumber)
+  );
 
   return row || null;
 }

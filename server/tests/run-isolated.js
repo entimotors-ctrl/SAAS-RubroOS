@@ -32,6 +32,13 @@ async function freePort() {
 // el mismo arnés. Sin esta variable, el comportamiento es idéntico al de
 // siempre (SQLite).
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+// Rol restringido (Fase 3, RLS) que usa `DATABASE_URL` en cada suite: sin
+// superusuario/owner/BYPASSRLS, para que las políticas de
+// supabase/migrations/20261027140010_rls.sql se verifiquen de verdad en vez
+// de saltarse por correr como el superusuario administrativo. La contraseña
+// es fija porque la base efímera solo vive en 127.0.0.1 durante la corrida.
+const APP_ROLE = 'rubroos_app';
+const APP_ROLE_PASSWORD = 'rubroos-test-role-password';
 async function pgDatabaseUrl(name) {
   const { Client } = require('pg');
   const dbName = name.replace(/-/g, '_');
@@ -40,16 +47,24 @@ async function pgDatabaseUrl(name) {
   await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
   await admin.query(`CREATE DATABASE ${dbName}`);
   await admin.end();
-  return `${TEST_DATABASE_URL}/${dbName}`;
+  const adminUrl = new URL(`${TEST_DATABASE_URL}/${dbName}`);
+  const appUrl = new URL(adminUrl.toString());
+  appUrl.username = APP_ROLE;
+  appUrl.password = APP_ROLE_PASSWORD;
+  return { databaseUrl: appUrl.toString(), adminUrl: adminUrl.toString() };
 }
 (async () => {
   let failed = false;
-  for (const name of ['functional-smoke','security-multitenant','ai-core','ai-chat','whatsapp','taller-hardening','whatsapp-empty-pending','release-foundation','migration-safety','release-http','multi-business-beta','stable-operations','staff-portal']) {
+  for (const name of ['functional-smoke','security-multitenant','ai-core','ai-chat','whatsapp','taller-hardening','whatsapp-empty-pending','release-foundation','migration-safety','release-http','multi-business-beta','stable-operations','staff-portal','rls-defense']) {
     if(process.argv.length>2&&!process.argv.slice(2).includes(name))continue;
     const port = await freePort();
-    const dbEnv = TEST_DATABASE_URL
-      ? { DATABASE_URL: await pgDatabaseUrl(name), MIGRATIONS_DIR: path.join(source, '..', 'supabase', 'migrations') }
-      : { DATABASE_PATH: path.join(root, name+'.db') };
+    let dbEnv;
+    if (TEST_DATABASE_URL) {
+      const { databaseUrl, adminUrl } = await pgDatabaseUrl(name);
+      dbEnv = { DATABASE_URL: databaseUrl, DATABASE_ADMIN_URL: adminUrl, MIGRATIONS_DIR: path.join(source, '..', 'supabase', 'migrations') };
+    } else {
+      dbEnv = { DATABASE_PATH: path.join(root, name+'.db') };
+    }
     const env = { ...process.env, NODE_ENV:'test', ...dbEnv, JWT_SECRET:'isolated-regression-key', OWNER_EMAIL:'owner@audit.test', OWNER_SEED_PASSWORD:'Isolated-test-password!', AI_FAKE_PROVIDER:'1', WHATSAPP_FAKE_TRANSPORT:'1', WHATSAPP_APP_SECRET:'testsecret', WHATSAPP_VERIFY_TOKEN:'testverify', WHATSAPP_PHONE_NUMBER_ID:'PNID_TEST_SUITE', WHATSAPP_ACCESS_TOKEN:'fake-only', PORT:String(port), HOST:'127.0.0.1', API_URL:`http://127.0.0.1:${port}/api` };
     const api = launch(['src/index.js'], env);
     const apiFinished = finish(api);

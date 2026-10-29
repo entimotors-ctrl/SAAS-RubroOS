@@ -1,9 +1,9 @@
-const assert=require('node:assert/strict'),db=require('../src/db'),{signToken}=require('../src/middleware/auth');
+const assert=require('node:assert/strict'),db=require('../src/db'),{signToken}=require('../src/middleware/auth'),dbAccess=require('../src/security/dbAccess');
 if(process.env.NODE_ENV!=='test'||!process.env.API_URL)throw Error('Use npm test');
 let n=0;const check=(a,b)=>{assert.deepEqual(a,b);n++;};
 const tokens={},tenants={};
 async function req(type,path,method='GET',body){const r=await fetch(process.env.API_URL+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+tokens[type]},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json()};}
-(async()=>{
+dbAccess.asSystem(async()=>{
  for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=await db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');tenants[type]=u.tenant_id;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
  const owner=await db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=await signToken({sub:owner.id,role:'owner'});
  for(const type of Object.keys(tenants)){const r=await req(type,'/auth/login','POST',{business_type:type,email:'maestro@rubroos.test',password:'Maestro2026!'});check(r.status,200);check(r.body.tenant.id,tenants[type]);check((await req(type,'/owner/tenants')).status,403);}
@@ -59,4 +59,4 @@ async function req(type,path,method='GET',body){const r=await fetch(process.env.
  check((await req('owner','/owner/events')).body.length>=3,true);
  check((await req('agro','/auth/login','POST',{business_type:'agro',email:'qa-new@test.example',password:'QA-password-2026!'})).status,403);
  console.log(`${n}/${n} checks OK`);
-})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.close());
+}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.close());

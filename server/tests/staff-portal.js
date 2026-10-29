@@ -1,11 +1,11 @@
-const assert=require('node:assert/strict'),db=require('../src/db'),{signToken}=require('../src/middleware/auth'),crypto=require('node:crypto');
+const assert=require('node:assert/strict'),db=require('../src/db'),{signToken}=require('../src/middleware/auth'),crypto=require('node:crypto'),dbAccess=require('../src/security/dbAccess');
 if(process.env.NODE_ENV!=='test'||!process.env.API_URL)throw Error('Use isolated runner');
 let n=0;function check(a,b){assert.deepEqual(a,b);n++;}
 const users={},tokens={};
 async function req(who,path,method='GET',body){const r=await fetch(process.env.API_URL+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+(tokens[who]||'')},body:body===undefined?undefined:JSON.stringify(body)});const value=await r.json();return {status:r.status,body:value};}
 async function invite(type,suffix,barbero_id){const r=await req(type,'/staff/members','POST',{nombre:'QA '+suffix,email:suffix+'@staff.test',barbero_id,role:'tenant_admin',tenant_id:users.agro.tenant_id});check(r.status,201);return r.body;}
 async function activate(i,key){const r=await req('', '/staff-public/activate','POST',{token:i.token,password:'Staff-test-2026!'});check(r.status,200);check(r.body.user.role,'tenant_staff');tokens[key]=r.body.token;return r.body;}
-(async()=>{
+dbAccess.asSystem(async()=>{
  for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=await db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');users[type]=u;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
  for(const type of Object.keys(users)){
   const i=await invite(type,type);check((await db.prepare('SELECT tenant_id FROM users WHERE id=?').get(i.user.id)).tenant_id,users[type].tenant_id);
@@ -63,4 +63,4 @@ async function activate(i,key){const r=await req('', '/staff-public/activate','P
  check((await req('agro',`/staff/members/${b.user.id}`,'PUT',{access_status:'suspendido'})).status,404);
  check((await req('barberia','/staff/events')).body.some(e=>e.detail.includes(a.token)),false);
  console.log(n+' checks OK');
-})().catch(e=>{console.error(e);process.exitCode=1;});
+}).catch(e=>{console.error(e);process.exitCode=1;});

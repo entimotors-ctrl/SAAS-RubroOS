@@ -4,6 +4,7 @@ const {ServiceError} = require('./errors');
 const {text,date} = require('./validation');
 const {hashPassword} = require('./passwords');
 const {activeTenant} = require('../security/access');
+const dbAccess = require('../security/dbAccess');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const clean = (value,label,max=500) => text(value,label,max);
 async function event(tid,actor,type,id,action,detail) {
@@ -44,15 +45,20 @@ async function invitation(token){
   const row=await db.prepare(`SELECT i.*,u.nombre,u.email,u.business_type,u.access_status,t.nombre_empresa FROM staff_invitations i JOIN users u ON u.id=i.user_id AND u.tenant_id=i.tenant_id JOIN tenants t ON t.id=i.tenant_id WHERE i.token_hash=? AND i.used_at IS NULL AND i.expires_at>? AND u.role='tenant_staff' AND u.access_status='invitado'`).get(digest(token),Date.now());
   if(!row||!(await activeTenant(row.tenant_id,row.business_type)))throw new ServiceError('Invitación inválida, utilizada o vencida',400);return row;
 }
-async function preview(token){const r=await invitation(token);return {nombre:r.nombre,negocio:r.nombre_empresa,business_type:r.business_type,expires_at:r.expires_at};}
+// preview()/activate() corren bajo asSystem: el token de invitación no revela
+// a qué tenant pertenece hasta que se busca en staff_invitations, así que no
+// hay forma de filtrar por tenant_id de antemano (ver routes/staffPublic.js).
+async function preview(token){return dbAccess.asSystem(async ()=>{const r=await invitation(token);return {nombre:r.nombre,negocio:r.nombre_empresa,business_type:r.business_type,expires_at:r.expires_at};});}
 async function activate(token,password){
-  await invitation(token);const hash=hashPassword(password);
-  return db.transaction(async ()=>{const r=await invitation(token);
-    await db.prepare("UPDATE users SET password_hash=?,access_status='activo',session_version=session_version+1 WHERE id=?").run(hash,r.user_id);
-    await db.prepare('UPDATE staff_invitations SET used_at=? WHERE user_id=?').run(Date.now(),r.user_id);
-    await event(r.tenant_id,r.user_id,'colaborador',r.user_id,'invitacion.aceptada',{});
-    return db.prepare('SELECT id,nombre,email,tenant_id,business_type,role FROM users WHERE id=?').get(r.user_id);
-  }).immediate();
+  return dbAccess.asSystem(async ()=>{
+    await invitation(token);const hash=hashPassword(password);
+    return db.transaction(async ()=>{const r=await invitation(token);
+      await db.prepare("UPDATE users SET password_hash=?,access_status='activo',session_version=session_version+1 WHERE id=?").run(hash,r.user_id);
+      await db.prepare('UPDATE staff_invitations SET used_at=? WHERE user_id=?').run(Date.now(),r.user_id);
+      await event(r.tenant_id,r.user_id,'colaborador',r.user_id,'invitacion.aceptada',{});
+      return db.prepare('SELECT id,nombre,email,tenant_id,business_type,role FROM users WHERE id=?').get(r.user_id);
+    }).immediate();
+  });
 }
 async function updateMember(context,id,data){return db.transaction(async ()=>{
   const tid=context.tenant_id,u=await member(tid,id),changes={};

@@ -9,6 +9,7 @@
  */
 
 const db = require('../src/db');
+const dbAccess = require('../src/security/dbAccess');
 const tallerService = require('../src/services/tallerService');
 
 let pass = 0;
@@ -153,4 +154,4 @@ async function main() {
   if (fail > 0) process.exit(1);
 }
 
-main().catch(e=>{console.error(e);process.exitCode=1;});
+dbAccess.asSystem(main).catch(e=>{console.error(e);process.exitCode=1;});

@@ -16,6 +16,7 @@
  */
 
 const db = require('../src/db');
+const dbAccess = require('../src/security/dbAccess');
 require('../src/ai/tools');
 const { buildContext } = require('../src/ai/core/context');
 const history = require('../src/ai/core/history');
@@ -276,4 +277,4 @@ async function runChecks({ tallerA, tallerB, carwashA, agroA }) {
   );
 }
 
-main().catch(e=>{console.error(e);process.exitCode=1;});
+dbAccess.asSystem(main).catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const db = require('../db');
 const { activeTenant } = require('../security/access');
+const dbAccess = require('../security/dbAccess');
 
 if (!process.env.JWT_SECRET) {
   throw new Error(
@@ -11,7 +12,10 @@ if (!process.env.JWT_SECRET) {
 const JWT_SECRET = process.env.JWT_SECRET;
 
 async function signToken(payload) {
-  const user=await db.prepare('SELECT session_version FROM users WHERE id=?').get(payload.sub);
+  // Se puede invocar antes de que exista cualquier contexto de tenant (login,
+  // registro, activación de invitación) — siempre lee solo la fila del propio
+  // usuario por id, nunca datos de otro tenant.
+  const user = await dbAccess.asSystem(() => db.prepare('SELECT session_version FROM users WHERE id=?').get(payload.sub));
   return jwt.sign({...payload,sv:user?.session_version||0}, JWT_SECRET, { expiresIn: '12h' });
 }
 
@@ -21,16 +25,23 @@ async function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'No autenticado' });
   try {
     const claims = jwt.verify(token, JWT_SECRET);
-    const user = await db.prepare('SELECT id, tenant_id, business_type, role, nombre, email, session_version, access_status FROM users WHERE id = ?').get(claims.sub);
+    // Quién es el usuario todavía no se sabe con qué contexto leer (para eso
+    // es justo esta consulta) — de ahí en adelante (incluida activeTenant())
+    // corre ya con el contexto real (tenant u owner) para el resto del
+    // request, incluyendo requireTenant/requireOwner y el handler de la ruta.
+    const user = await dbAccess.asSystem(() => db.prepare('SELECT id, tenant_id, business_type, role, nombre, email, session_version, access_status FROM users WHERE id = ?').get(claims.sub));
     if (!user || user.access_status!=='activo' || (claims.sv||0)!==user.session_version || (user.tenant_id || null) !== (claims.tenant_id || null)
       || (user.business_type || null) !== (claims.business_type || null)) {
       return res.status(401).json({ error: 'La sesión ya no es válida. Inicia sesión de nuevo.' });
     }
-    if (user.role !== 'owner' && !(await activeTenant(user.tenant_id, user.business_type))) {
-      return res.status(403).json({ error: 'El negocio no está activo. Contacta al administrador.' });
-    }
-    req.user = { ...claims, role: user.role, nombre: user.nombre, email: user.email };
-    next();
+    const withContext = user.role === 'owner' ? dbAccess.asOwner : (fn) => dbAccess.asTenant(user.tenant_id, fn);
+    return withContext(async () => {
+      if (user.role !== 'owner' && !(await activeTenant(user.tenant_id, user.business_type))) {
+        return res.status(403).json({ error: 'El negocio no está activo. Contacta al administrador.' });
+      }
+      req.user = { ...claims, role: user.role, nombre: user.nombre, email: user.email };
+      next();
+    });
   } catch {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }

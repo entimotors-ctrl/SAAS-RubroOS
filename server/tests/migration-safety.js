@@ -30,7 +30,7 @@ try {
   // bajo el arnés de Postgres (TEST_DATABASE_URL), hay que quitar
   // DATABASE_URL del entorno heredado o el hijo usaría ese adaptador en vez
   // de SQLite y la aserción síncrona de abajo (sin await) dejaría de aplicar.
-  const envSinPostgres={...process.env};delete envSinPostgres.DATABASE_URL;
+  const envSinPostgres={...process.env};delete envSinPostgres.DATABASE_URL;delete envSinPostgres.DATABASE_ADMIN_URL;
   // ensureSeed() es async (toda la capa de datos lo es desde la Fase 2) — hay
   // que esperarla antes de leer, o las lecturas de abajo correrían antes de
   // que termine de sembrar.

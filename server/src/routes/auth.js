@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const db = require('../db');
 const { signToken, requireAuth } = require('../middleware/auth');
 const { BUSINESS_TYPE_IDS } = require('../business-types');
+const dbAccess = require('../security/dbAccess');
 
 const router = express.Router();
 
@@ -38,7 +39,10 @@ async function uniqueSlug(base) {
   return slug;
 }
 
-router.post('/registro', authLimiter, async (req, res) => {
+// /registro, /login y /owner-login corren bajo asSystem: por diseño resuelven
+// A QUÉ tenant pertenece algo (o crean uno nuevo), así que no pueden filtrar
+// por un tenant_id que todavía no conocen — ver supabase/migrations/20261027140010_rls.sql.
+router.post('/registro', authLimiter, async (req, res) => dbAccess.asSystem(async () => {
   if(process.env.NODE_ENV==='production'&&process.env.PUBLIC_REGISTRATION!=='1')return res.status(403).json({error:'Solicita el alta al administrador de RubroOS'});
   const { business_type, empresa_nombre, nombre, email, password } = req.body || {};
   if (!BUSINESS_TYPE_IDS.includes(business_type)) {
@@ -87,9 +91,9 @@ router.post('/registro', authLimiter, async (req, res) => {
     user: { id: userId, nombre, email, role: 'tenant_admin', business_type },
     tenant: { id: tenantId, nombre_empresa: empresa_nombre, slug, business_type, plan: 'trial', status: 'trial' },
   });
-});
+}));
 
-router.post('/login', authLimiter, async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => dbAccess.asSystem(async () => {
   const { business_type, email, password } = req.body || {};
   if (!BUSINESS_TYPE_IDS.includes(business_type)) {
     return res.status(400).json({ error: 'Rubro inválido' });
@@ -118,9 +122,9 @@ router.post('/login', authLimiter, async (req, res) => {
     user: { id: user.id, nombre: user.nombre, email: user.email, role: user.role, business_type },
     tenant,
   });
-});
+}));
 
-router.post('/owner-login', authLimiter, async (req, res) => {
+router.post('/owner-login', authLimiter, async (req, res) => dbAccess.asSystem(async () => {
   const { email, password } = req.body || {};
   if(typeof email!=='string'||typeof password!=='string')return res.status(400).json({error:'Correo y contraseña requeridos'});
   const user = await db.prepare("SELECT * FROM users WHERE email = ? AND role = 'owner'").get(email);
@@ -129,7 +133,7 @@ router.post('/owner-login', authLimiter, async (req, res) => {
   }
   const token = await signToken({ sub: user.id, role: 'owner', nombre: user.nombre, email: user.email });
   res.json({ token, user: { id: user.id, nombre: user.nombre, email: user.email, role: 'owner' } });
-});
+}));
 
 router.get('/me', requireAuth, async (req, res) => {
   if (req.user.role === 'owner') {

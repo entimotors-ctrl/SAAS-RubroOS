@@ -1,11 +1,12 @@
 const assert = require('node:assert/strict');
 const db = require('../src/db');
 const { signToken } = require('../src/middleware/auth');
+const dbAccess = require('../src/security/dbAccess');
 const base = process.env.API_URL;
 if (!base || process.env.NODE_ENV !== 'test') throw new Error('Run through npm test');
 const headers=t=>({'Content-Type':'application/json',Authorization:'Bearer '+t});
 async function req(path,method,t,body){const r=await fetch(base+path,{method,headers:headers(t),body:body?JSON.stringify(body):undefined});return {status:r.status,body:r.status===204?null:await r.json()};}
-(async()=>{
+dbAccess.asSystem(async()=>{
  let checks=0;
  const check=(actual,expected)=>{assert.equal(actual,expected);checks++;};
  const tenant = await db.prepare("SELECT * FROM tenants WHERE business_type='taller' LIMIT 1").get();
@@ -35,4 +36,4 @@ async function req(path,method,t,body){const r=await fetch(base+path,{method,hea
  await db.prepare("UPDATE tenants SET status='activo' WHERE id=?").run(tenant.id);
  check((await req('/taller/clientes','GET',adminToken)).status,200);
  console.log(`${checks}/${checks} checks OK`);
-})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.close());
+}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.close());
