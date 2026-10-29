@@ -12,6 +12,18 @@ const { Pool, types } = require('pg');
 types.setTypeParser(20, (v) => parseInt(v, 10)); // int8 / bigint
 types.setTypeParser(1700, (v) => parseFloat(v)); // numeric
 
+// `pg` por defecto parsea DATE/TIMESTAMP(TZ) a un objeto Date de JS.
+// better-sqlite3 siempre devolvía TEXT plano ('YYYY-MM-DD' / 'YYYY-MM-DD
+// HH:MM:SS'), y el código existente depende de eso: lo trata como string
+// (p. ej. `action.created_at.replace(' ','T')+'Z'` en ai/core/orchestrator.js,
+// o lo serializa tal cual en respuestas JSON). Se reproduce ese formato aquí
+// en vez de dejar pasar un Date — con TimeZone=UTC fijado arriba en el Pool,
+// el wire text de timestamptz ya viene en UTC, así que tomar los primeros 19
+// caracteres ('YYYY-MM-DD HH:MM:SS', sin fracción de segundo ni offset) basta.
+types.setTypeParser(1082, (v) => v); // date: ya viene como 'YYYY-MM-DD'
+types.setTypeParser(1114, (v) => v.slice(0, 19)); // timestamp
+types.setTypeParser(1184, (v) => v.slice(0, 19)); // timestamptz
+
 /**
  * Adaptador PostgreSQL con la MISMA forma que usa hoy el server/src/db.js de
  * better-sqlite3 (`.prepare(sql).get/all/run(...)`, `db.transaction(fn).immediate()`,
@@ -36,7 +48,15 @@ const TABLES_WITHOUT_ID = new Set([
 // sslmode=require en la cadena de conexión activa TLS con verificación normal
 // del certificado (Supabase usa una CA pública válida) — nunca se deshabilita
 // rejectUnauthorized aquí.
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: /sslmode=require/.test(process.env.DATABASE_URL || '') ? true : undefined });
+//
+// options: '-c TimeZone=UTC' fija la sesión de Postgres en UTC sin importar
+// la configuración del servidor: el código de la app (igual que el lado
+// JS — ver businessClock.js) siempre trata un timestamp sin zona como UTC: al
+// insertar `datetime('now')`/`now()`, y al comparar/castear un string de
+// fecha-hora "naive" (sin offset) a timestamptz. Si la sesión usara otro
+// TimeZone, Postgres interpretaría esos strings naive con esa zona en vez de
+// UTC y el resultado no coincidiría con el lado SQLite/JS.
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: /sslmode=require/.test(process.env.DATABASE_URL || '') ? true : undefined, options: '-c TimeZone=UTC' });
 const txContext = new AsyncLocalStorage();
 function client() { return txContext.getStore() || pool; }
 
@@ -119,7 +139,7 @@ function transaction(fn) {
 async function ensureSchema() {
   const { rows } = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='tenants'");
   if (rows.length) return;
-  const dir = path.join(__dirname, '..', '..', '..', 'supabase', 'migrations');
+  const dir = process.env.MIGRATIONS_DIR || path.join(__dirname, '..', '..', '..', 'supabase', 'migrations');
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
   const conn = await pool.connect();
   try {

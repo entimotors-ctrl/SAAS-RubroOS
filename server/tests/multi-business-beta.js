@@ -4,8 +4,8 @@ let n=0;const check=(a,b)=>{assert.deepEqual(a,b);n++;};
 const tokens={},tenants={};
 async function req(type,path,method='GET',body){const r=await fetch(process.env.API_URL+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+tokens[type]},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json()};}
 (async()=>{
- for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');tenants[type]=u.tenant_id;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
- const owner=db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=await signToken({sub:owner.id,role:'owner'});
+ for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=await db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');tenants[type]=u.tenant_id;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
+ const owner=await db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=await signToken({sub:owner.id,role:'owner'});
  for(const type of Object.keys(tenants)){const r=await req(type,'/auth/login','POST',{business_type:type,email:'maestro@rubroos.test',password:'Maestro2026!'});check(r.status,200);check(r.body.tenant.id,tenants[type]);check((await req(type,'/owner/tenants')).status,403);}
  const b=(await req('barberia','/barberia/barberos','POST',{nombre:'QA barber',comision_porcentaje:40})).body;check(b.activo,1);
  check((await req('barberia','/barberia/barberos','POST',{nombre:'Invalid',comision_porcentaje:101})).status,400);
@@ -32,16 +32,16 @@ async function req(type,path,method='GET',body){const r=await fetch(process.env.
  const p=(await req('agro','/agro/productos','POST',{nombre:'QA seed',precio:10,stock:3})).body;
  const order=(await req('agro','/agro/pedidos','POST',{items:[{producto_id:p.id,cantidad:2,precio_unitario:10}]})).body;check(order.total,20);
  for(let i=0;i<2;i++)check((await req('agro',`/agro/pedidos/${order.id}/estado`,'PUT',{estado:'entregado'})).status,200);
- check(db.prepare('SELECT stock FROM agro_productos WHERE id=?').get(p.id).stock,1);
+ check((await db.prepare('SELECT stock FROM agro_productos WHERE id=?').get(p.id)).stock,1);
  check((await req('agro',`/agro/pedidos/${order.id}/estado`,'PUT',{estado:'cancelado'})).status,409);
  const bad=(await req('agro','/agro/pedidos','POST',{items:[{producto_id:p.id,cantidad:1,precio_unitario:10},{producto_id:p.id,cantidad:1,precio_unitario:10}]})).body;
  check((await req('agro',`/agro/pedidos/${bad.id}/estado`,'PUT',{estado:'entregado'})).status,409);
- check(db.prepare('SELECT stock FROM agro_productos WHERE id=?').get(p.id).stock,1);
+ check((await db.prepare('SELECT stock FROM agro_productos WHERE id=?').get(p.id)).stock,1);
  check((await req('agro','/agro/cotizaciones-cerca','POST',{metros:10,hilos:-2})).status,400);
  const a=(await req('ganaderia','/ganaderia/animales','POST',{arete:'QA-BETA',nombre:'Estrella'})).body;check(a.sexo,'hembra');check(a.estado,'activo');
  const milk={animal_id:a.id,fecha:'2027-01-21',turno:'AM',litros:12.5};check((await req('ganaderia','/ganaderia/produccion','POST',milk)).status,201);check((await req('ganaderia','/ganaderia/produccion','POST',milk)).status,409);
  check((await req('ganaderia','/ganaderia/produccion','POST',{...milk,turno:'PM'})).status,201);check((await req('ganaderia','/ganaderia/produccion','POST',{...milk,fecha:'2027-02-30'})).status,400);
- const male=db.prepare("SELECT id FROM ganaderia_animales WHERE tenant_id=? AND sexo='macho'").get(tenants.ganaderia);check((await req('ganaderia','/ganaderia/produccion','POST',{...milk,animal_id:male.id})).status,400);
+ const male=await db.prepare("SELECT id FROM ganaderia_animales WHERE tenant_id=? AND sexo='macho'").get(tenants.ganaderia);check((await req('ganaderia','/ganaderia/produccion','POST',{...milk,animal_id:male.id})).status,400);
  const c=(await req('carwash','/carwash/clientes','POST',{nombre:'QA driver'})).body;const ws=(await req('carwash','/carwash/servicios','POST',{nombre:'QA wash',precio:100,duracion_min:20})).body;
  check((await req('carwash','/carwash/turnos','POST',{cliente_id:c.id,servicio_id:ws.id,usa_membresia:true})).status,400);
  const before=(await req('carwash','/carwash/resumen')).body;

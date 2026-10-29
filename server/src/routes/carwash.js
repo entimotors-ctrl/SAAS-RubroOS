@@ -84,7 +84,6 @@ router.put('/turnos/:id/estado', async (req, res, next) => {
   }
 });
 
-// NOTA Fase 2 (Postgres): business_day()/business_today() — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
 router.get('/resumen', async (req, res) => {
   const tenantId = req.user.tenant_id;
   const hoy = await db

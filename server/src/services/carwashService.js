@@ -19,9 +19,6 @@ async function crearTurno(tenantId, { cliente_id, vehiculo_id, servicio_id, usa_
   let usaMembresiaFinal = 0;
   if (usa_membresia && !cliente_id) throw new ServiceError('Selecciona el cliente de la membresía');
   if (usa_membresia && cliente_id) {
-    // NOTA Fase 2 (Postgres): business_today() es una función SQL registrada
-    // con db.function() (ver services/businessClock.js), solo existe en
-    // better-sqlite3. Ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
     const membresia = await db
       .prepare("SELECT * FROM carwash_membresias WHERE cliente_id = ? AND tenant_id = ? AND estado = 'activa' AND fecha_renovacion >= business_today(tenant_id)")
       .get(cliente_id, tenantId);
@@ -60,12 +57,15 @@ async function crearMembresia(tenantId, { cliente_id, plan, precio_mensual } = {
   const cliente = await db.prepare('SELECT 1 FROM carwash_clientes WHERE id = ? AND tenant_id = ?').get(cliente_id, tenantId);
   if (!cliente) throw new ServiceError('El cliente indicado no existe o no pertenece a tu negocio');
 
-  // NOTA Fase 2 (Postgres): business_today() + date(x,'+1 month') — ver nota arriba.
+  // date(x,'+1 month') (SQLite, con "clamping" a fin de mes) -> sqlite_add_months()
+  // en Postgres (ver supabase/migrations/20261027140009_business_clock.sql).
+  const crearInfoSql = process.env.DATABASE_URL
+    ? `INSERT INTO carwash_membresias (tenant_id, cliente_id, plan, precio_mensual, fecha_inicio, fecha_renovacion, estado)
+       VALUES (?, ?, ?, ?, business_today(?), sqlite_add_months(business_today(?), 1), 'activa')`
+    : `INSERT INTO carwash_membresias (tenant_id, cliente_id, plan, precio_mensual, fecha_inicio, fecha_renovacion, estado)
+       VALUES (?, ?, ?, ?, business_today(?), date(business_today(?), '+1 month'), 'activa')`;
   const info = await db
-    .prepare(
-      `INSERT INTO carwash_membresias (tenant_id, cliente_id, plan, precio_mensual, fecha_inicio, fecha_renovacion, estado)
-       VALUES (?, ?, ?, ?, business_today(?), date(business_today(?), '+1 month'), 'activa')`
-    )
+    .prepare(crearInfoSql)
     .run(tenantId, cliente_id, plan, money(precio_mensual ?? 0, 'Precio mensual') / 100,tenantId,tenantId);
   return db.prepare('SELECT * FROM carwash_membresias WHERE id = ?').get(info.lastInsertRowid);
 }
@@ -73,7 +73,11 @@ async function crearMembresia(tenantId, { cliente_id, plan, precio_mensual } = {
 async function renovarMembresia(tenantId, membresiaId) {
   const m = await db.prepare('SELECT * FROM carwash_membresias WHERE id = ? AND tenant_id = ?').get(membresiaId, tenantId);
   if (!m) throw new ServiceError('No encontrada', 404);
-  await db.prepare("UPDATE carwash_membresias SET fecha_renovacion = date(MAX(fecha_renovacion,business_today(tenant_id)), '+1 month'), estado = 'activa' WHERE id = ?").run(m.id);
+  // MAX(a,b) (SQLite, escalar) -> GREATEST(a,b) (Postgres: MAX es solo agregado).
+  const renovarSql = process.env.DATABASE_URL
+    ? "UPDATE carwash_membresias SET fecha_renovacion = sqlite_add_months(GREATEST(fecha_renovacion,business_today(tenant_id)), 1), estado = 'activa' WHERE id = ?"
+    : "UPDATE carwash_membresias SET fecha_renovacion = date(MAX(fecha_renovacion,business_today(tenant_id)), '+1 month'), estado = 'activa' WHERE id = ?";
+  await db.prepare(renovarSql).run(m.id);
   return db.prepare('SELECT * FROM carwash_membresias WHERE id = ?').get(m.id);
 }
 

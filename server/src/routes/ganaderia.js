@@ -28,16 +28,18 @@ router.use(
   })
 );
 
-// NOTA Fase 2 (Postgres): business_today() + date(x,'+30 day') — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
 router.get('/sanidad/alertas', async (req, res) => {
-  const rows = await db
-    .prepare(
-      `SELECT s.*, a.arete, a.nombre AS animal_nombre FROM ganaderia_sanidad s
+  // date(x,'+30 day') (SQLite) -> x + 30 (Postgres: date + integer = date).
+  const alertasSql = process.env.DATABASE_URL
+    ? `SELECT s.*, a.arete, a.nombre AS animal_nombre FROM ganaderia_sanidad s
+       JOIN ganaderia_animales a ON a.id = s.animal_id AND a.tenant_id = s.tenant_id
+       WHERE s.tenant_id = ? AND s.proxima_fecha IS NOT NULL AND s.proxima_fecha <= business_today(s.tenant_id) + 30
+       ORDER BY s.proxima_fecha ASC`
+    : `SELECT s.*, a.arete, a.nombre AS animal_nombre FROM ganaderia_sanidad s
        JOIN ganaderia_animales a ON a.id = s.animal_id AND a.tenant_id = s.tenant_id
        WHERE s.tenant_id = ? AND s.proxima_fecha IS NOT NULL AND s.proxima_fecha <= date(business_today(s.tenant_id), '+30 day')
-       ORDER BY s.proxima_fecha ASC`
-    )
-    .all(req.user.tenant_id);
+       ORDER BY s.proxima_fecha ASC`;
+  const rows = await db.prepare(alertasSql).all(req.user.tenant_id);
   res.json(rows);
 });
 

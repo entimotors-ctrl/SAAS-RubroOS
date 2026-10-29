@@ -84,12 +84,14 @@ async function runChecks({ tallerA, tallerB, carwashA, agroA }) {
   const clienteA = (await db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tallerA, 'Cliente A')).lastInsertRowid;
   const clienteB = (await db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tallerB, 'Cliente B')).lastInsertRowid;
   const clienteCarA = (await db.prepare('INSERT INTO carwash_clientes (tenant_id, nombre) VALUES (?, ?)').run(carwashA, 'Cliente Carwash A')).lastInsertRowid;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const enUnMes = (() => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 10); })();
   const membresiaA = (await db
     .prepare(
       `INSERT INTO carwash_membresias (tenant_id, cliente_id, plan, precio_mensual, fecha_inicio, fecha_renovacion, estado)
-       VALUES (?, ?, 'Ilimitado', 690, date('now'), date('now','+1 month'), 'activa')`
+       VALUES (?, ?, 'Ilimitado', 690, ?, ?, 'activa')`
     )
-    .run(carwashA, clienteCarA)).lastInsertRowid;
+    .run(carwashA, clienteCarA, hoy, enUnMes)).lastInsertRowid;
 
   const fixtureUser = async (tenantId, businessType, role) => (await db.prepare('INSERT INTO users (tenant_id,business_type,email,password_hash,nombre,role) VALUES (?,?,?,?,?,?)').run(tenantId,businessType,`core-${tenantId}-${role}@test.local`,'x','QA',role)).lastInsertRowid;
   const userIds = [null,

@@ -67,26 +67,28 @@ async function main() {
   const carwashA = await registro('carwash', 'carwash-a');
 
   // Cliente real para poder probar la cadena buscarCliente -> registrarVenta.
-  const clienteJuan = db
+  const clienteJuan = (await db
     .prepare('INSERT INTO taller_clientes (tenant_id, nombre, telefono) VALUES (?, ?, ?)')
-    .run(tallerA.tenantId, 'Juan Pérez', '9999-0000').lastInsertRowid;
+    .run(tallerA.tenantId, 'Juan Pérez', '9999-0000')).lastInsertRowid;
 
   // Usuario tenant_staff insertado directo en BD (no hay endpoint público
   // para crear uno todavía) para probar el límite de permisos.
-  const staffUserId = db
+  const staffUserId = (await db
     .prepare("INSERT INTO users (tenant_id, business_type, email, password_hash, nombre, role) VALUES (?, 'carwash', ?, 'x', 'QA Staff', 'tenant_staff')")
-    .run(carwashA.tenantId, `staff-${Date.now()}@qa-ai-chat.test`).lastInsertRowid;
+    .run(carwashA.tenantId, `staff-${Date.now()}@qa-ai-chat.test`)).lastInsertRowid;
   const staffToken = await tokenForStaffUser({ tenantId: carwashA.tenantId, businessType: 'carwash', userId: staffUserId, email: 'staff' });
-  const clienteCarwash = db.prepare('INSERT INTO carwash_clientes (tenant_id, nombre) VALUES (?, ?)').run(carwashA.tenantId, 'Cliente Carwash A').lastInsertRowid;
-  const membresiaCarwash = db
+  const clienteCarwash = (await db.prepare('INSERT INTO carwash_clientes (tenant_id, nombre) VALUES (?, ?)').run(carwashA.tenantId, 'Cliente Carwash A')).lastInsertRowid;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const enUnMes = (() => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 10); })();
+  const membresiaCarwash = (await db
     .prepare(
       `INSERT INTO carwash_membresias (tenant_id, cliente_id, plan, precio_mensual, fecha_inicio, fecha_renovacion, estado)
-       VALUES (?, ?, 'Ilimitado', 690, date('now'), date('now','+1 month'), 'activa')`
+       VALUES (?, ?, 'Ilimitado', 690, ?, ?, 'activa')`
     )
-    .run(carwashA.tenantId, clienteCarwash).lastInsertRowid;
+    .run(carwashA.tenantId, clienteCarwash, hoy, enUnMes)).lastInsertRowid;
 
   console.log('\n=== Lectura: "¿Cuánto stock tengo?" ===');
-  const inventarioReal = db.prepare('SELECT COUNT(*) n FROM taller_inventario WHERE tenant_id = ?').get(tallerA.tenantId).n;
+  const inventarioReal = (await db.prepare('SELECT COUNT(*) n FROM taller_inventario WHERE tenant_id = ?').get(tallerA.tenantId)).n;
   const rInventario = await api('/ai/chat', { method: 'POST', token: tallerA.token, body: { message: '¿Cuánto stock tengo?' } });
   check('POST /ai/chat responde 200', rInventario.status === 200, JSON.stringify(rInventario.body));
   check('Responde con el conteo REAL de inventario (no inventado)', rInventario.body?.message?.includes(String(inventarioReal)), rInventario.body?.message);
@@ -99,17 +101,17 @@ async function main() {
   check('Encuentra al cliente real por nombre', rBuscar.body?.message?.includes('Juan Pérez'), rBuscar.body?.message);
 
   console.log('\n=== Acción + confirmación: "Registra una venta de 2 filtros para Juan Pérez" ===');
-  const ventasAntes = db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId).n;
+  const ventasAntes = (await db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId)).n;
   const rVenta = await api('/ai/chat', { method: 'POST', token: tallerA.token, body: { conversationId, message: 'Registra una venta de 2 filtros para Juan Pérez' } });
   check('type es "confirmation_required"', rVenta.body?.type === 'confirmation_required', JSON.stringify(rVenta.body));
   check('No expone tool_name ni argumentos internos al frontend', !JSON.stringify(rVenta.body).match(/toolName|registrarVenta/));
-  const ventasDespuesDeProponer = db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId).n;
+  const ventasDespuesDeProponer = (await db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId)).n;
   check('NO se ejecutó la venta todavía (sigue pendiente de confirmar)', ventasDespuesDeProponer === ventasAntes);
   const actionId = rVenta.body?.actionId;
 
   const rConfirm = await api('/ai/confirm', { method: 'POST', token: tallerA.token, body: { actionId } });
   check('POST /ai/confirm responde 200', rConfirm.status === 200, JSON.stringify(rConfirm.body));
-  const ventaCreada = db.prepare('SELECT * FROM taller_ventas WHERE tenant_id = ? ORDER BY id DESC LIMIT 1').get(tallerA.tenantId);
+  const ventaCreada = await db.prepare('SELECT * FROM taller_ventas WHERE tenant_id = ? ORDER BY id DESC LIMIT 1').get(tallerA.tenantId);
   check('La venta SÍ se ejecutó tras confirmar, con el total correcto (2 x 150)', ventaCreada?.total === 300, JSON.stringify(ventaCreada));
   check('El cliente vinculado es el correcto (Juan Pérez)', ventaCreada?.cliente_id === clienteJuan);
 
@@ -118,7 +120,7 @@ async function main() {
   const actionId2 = rVenta2.body?.actionId;
   const rCancel = await api('/ai/cancel', { method: 'POST', token: tallerA.token, body: { actionId: actionId2 } });
   check('POST /ai/cancel responde 200', rCancel.status === 200, JSON.stringify(rCancel.body));
-  const ventasDespuesDeCancelar = db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId).n;
+  const ventasDespuesDeCancelar = (await db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId)).n;
   check('Cancelar NO ejecuta la tool (no se creó una segunda venta)', ventasDespuesDeCancelar === ventasDespuesDeProponer + 1);
   const confirmarCancelada = await api('/ai/confirm', { method: 'POST', token: tallerA.token, body: { actionId: actionId2 } });
   check(
@@ -140,11 +142,11 @@ async function main() {
   console.log('\n=== Seguridad: permisos (tenant_staff intenta una acción destructive) ===');
   const rStaffConv = await api('/ai/chat', { method: 'POST', token: staffToken, body: { message: 'hola' } });
   const staffConvId = rStaffConv.body?.conversationId;
-  const membresiaAntes = db.prepare('SELECT estado FROM carwash_membresias WHERE id = ?').get(membresiaCarwash).estado;
+  const membresiaAntes = (await db.prepare('SELECT estado FROM carwash_membresias WHERE id = ?').get(membresiaCarwash)).estado;
   const rStaffCancel = await api('/ai/chat', { method: 'POST', token: staffToken, body: { conversationId: staffConvId, message: 'cancela la membresia' } });
   check('El chat rechaza el acceso del colaborador', rStaffCancel.status === 403);
   check('No se crea una conversación para el colaborador', rStaffConv.status === 403 && !staffConvId);
-  const membresiaDespues = db.prepare('SELECT estado FROM carwash_membresias WHERE id = ?').get(membresiaCarwash).estado;
+  const membresiaDespues = (await db.prepare('SELECT estado FROM carwash_membresias WHERE id = ?').get(membresiaCarwash)).estado;
   check('La membresía NO fue cancelada de verdad', membresiaDespues === membresiaAntes && membresiaAntes === 'activa');
 
   console.log('\n=== Seguridad: rubro incorrecto ===');
@@ -165,7 +167,7 @@ async function main() {
   const rArgsInvalidos = await api('/ai/chat', { method: 'POST', token: tallerA.token, body: { conversationId, message: 'cantidad invalida' } });
   check('Argumentos inválidos no crashea el chat, responde 200', rArgsInvalidos.status === 200);
   check('Refleja VALIDATION_ERROR', rArgsInvalidos.body?.message?.includes('VALIDATION_ERROR'), rArgsInvalidos.body?.message);
-  const ventasTrasArgsInvalidos = db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId).n;
+  const ventasTrasArgsInvalidos = (await db.prepare('SELECT COUNT(*) n FROM taller_ventas WHERE tenant_id = ?').get(tallerA.tenantId)).n;
   check('No se creó ninguna venta con cantidad inválida', ventasTrasArgsInvalidos === ventasDespuesDeCancelar);
 
   console.log('\n=== Errores: mensaje vacío / demasiado largo ===');
@@ -181,21 +183,21 @@ async function main() {
   check('GET /ai/conversations/:id/messages devuelve el historial real', rMensajes.status === 200 && rMensajes.body.length >= 4);
 
   console.log('\n=== Limpieza de datos de prueba ===');
-  const run = db.transaction(() => {
+  const run = db.transaction(async () => {
     for (const tid of [tallerA.tenantId, tallerB.tenantId, carwashA.tenantId]) {
-      db.prepare('DELETE FROM ai_actions WHERE tenant_id = ?').run(tid);
-      db.prepare('DELETE FROM ai_messages WHERE tenant_id = ?').run(tid);
-      db.prepare('DELETE FROM ai_conversations WHERE tenant_id = ?').run(tid);
-      db.prepare('DELETE FROM users WHERE tenant_id = ?').run(tid);
-      db.prepare('DELETE FROM tenants WHERE id = ?').run(tid);
+      await db.prepare('DELETE FROM ai_actions WHERE tenant_id = ?').run(tid);
+      await db.prepare('DELETE FROM ai_messages WHERE tenant_id = ?').run(tid);
+      await db.prepare('DELETE FROM ai_conversations WHERE tenant_id = ?').run(tid);
+      await db.prepare('DELETE FROM users WHERE tenant_id = ?').run(tid);
+      await db.prepare('DELETE FROM tenants WHERE id = ?').run(tid);
     }
-    db.prepare('DELETE FROM taller_venta_items WHERE venta_id IN (SELECT id FROM taller_ventas WHERE tenant_id = ?)').run(tallerA.tenantId);
-    db.prepare('DELETE FROM taller_ventas WHERE tenant_id = ?').run(tallerA.tenantId);
-    db.prepare('DELETE FROM taller_clientes WHERE tenant_id = ?').run(tallerA.tenantId);
-    db.prepare('DELETE FROM carwash_membresias WHERE tenant_id = ?').run(carwashA.tenantId);
-    db.prepare('DELETE FROM carwash_clientes WHERE tenant_id = ?').run(carwashA.tenantId);
+    await db.prepare('DELETE FROM taller_venta_items WHERE venta_id IN (SELECT id FROM taller_ventas WHERE tenant_id = ?)').run(tallerA.tenantId);
+    await db.prepare('DELETE FROM taller_ventas WHERE tenant_id = ?').run(tallerA.tenantId);
+    await db.prepare('DELETE FROM taller_clientes WHERE tenant_id = ?').run(tallerA.tenantId);
+    await db.prepare('DELETE FROM carwash_membresias WHERE tenant_id = ?').run(carwashA.tenantId);
+    await db.prepare('DELETE FROM carwash_clientes WHERE tenant_id = ?').run(carwashA.tenantId);
   });
-  run();
+  await run();
   console.log('  listo');
 
   console.log(`\n=== Resultado: ${pass}/${pass + fail} checks OK ===`);

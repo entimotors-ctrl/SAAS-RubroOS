@@ -140,7 +140,10 @@ try {
     schedule[1]={...schedule[1],hora_inicio:'18:00',hora_fin:'09:00',activo:1};
     await assert.rejects(()=>availability.setSchedule(barberTenant,barber,schedule),/cierre/);
   });
-  await test('Migration is repeatable',async ()=>{require('../src/db/migrations').migrate(db,':memory:');assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).n,7);});
+  // migrations.js (db.exec/db.pragma) es la herramienta de actualización de
+  // esquema propia de better-sqlite3, sin equivalente ni necesidad bajo
+  // Postgres (el esquema ahí lo aplica ensureSchema() desde supabase/migrations/).
+  if (!process.env.DATABASE_URL) await test('Migration is repeatable',async ()=>{require('../src/db/migrations').migrate(db,':memory:');assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).n,7);});
   console.log(`\n${passed}/${passed} checks OK`);
 } finally { db.close(); }
 })().catch(e=>{console.error(e);process.exitCode=1;});

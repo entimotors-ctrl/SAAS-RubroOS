@@ -1,6 +1,104 @@
 # Fase 2 (adaptador PostgreSQL): estado y punto de reanudación
 
-Actualizado el 27 de octubre de 2026.
+Actualizado el 29 de octubre de 2026.
+
+## ✅ FASE 2 COMPLETA — validada de punta a punta contra Postgres real
+
+Las 13 suites existentes (`node tests/run-isolated.js`) pasan **idénticas** contra
+SQLite (526/526) y contra un PostgreSQL 17 real (518/518 — la diferencia de 8
+son exactamente los checks de dos herramientas explícitamente fuera de
+alcance para Postgres: la prueba de `migrations.js` nativo de better-sqlite3,
+y el bloque de `maintenance/backups.js`/`restore.js`, ver más abajo). Ya no
+queda ningún hueco pendiente: `business_day()`/`business_today()` se
+resolvieron con la Opción A (funciones reales de Postgres). **Sigue sin
+definirse `DATABASE_URL` en ningún entorno real** — eso espera a la Fase 3
+(RLS) y a que el usuario decida activar el corte, no a nada técnico.
+
+### Cómo se corrió la validación (reproducible)
+
+```bash
+docker run -d --name rubroos-pg-test -e POSTGRES_PASSWORD=postgres -p 5433:5432 \
+  public.ecr.aws/supabase/postgres:17.6.1.134
+cd server
+TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5433" npm test
+docker stop rubroos-pg-test && docker rm rubroos-pg-test
+```
+
+`TEST_DATABASE_URL` es una variable nueva que entiende `tests/run-isolated.js`:
+si está definida, cada una de las 13 suites corre contra su propia base
+PostgreSQL (creada/recreada en el `postgres` administrativo), en vez de su
+propio archivo SQLite — mismo arnés, mismas 13 suites, sin tocar nada más.
+
+### `business_day()`/`business_today()`: resuelto con la Opción A
+
+Se eligió la Opción A documentada abajo (funciones reales de Postgres, no
+recalcular en JavaScript) porque Postgres tiene soporte nativo de zonas
+horarias (`AT TIME ZONE`) tan completo como `Intl.DateTimeFormat` del lado
+JS, y porque la alternativa (recalcular en JS) hubiera obligado a reescribir
+consultas con `GROUP BY`/agregados condicionales (comisiones por barbero,
+ventas agrupadas por día) para traer filas crudas y agrupar en la
+aplicación — mucho más invasivo que una migración nueva.
+
+- **`supabase/migrations/20261027140009_business_clock.sql`** (nueva): define
+  `tenant_timezone(tenant_id)`, `business_today(tenant_id)` y dos overloads de
+  `business_day(valor, tenant_id)` — uno para `TIMESTAMPTZ` (columnas como
+  `created_at`/`cobrada_at`/`entregado_at`) y otro para `DATE` (columnas como
+  `fecha`, donde es un identidad). Las tres leen `tenant_settings` (la MISMA
+  tabla que alimenta el cache en memoria del lado JS en `businessClock.js`),
+  así que no hay dos fuentes de verdad sobre la zona horaria de un tenant.
+  También define `sqlite_add_months(fecha, n)`, que replica el "clamping" de
+  SQLite al sumar meses (si el día de origen no existe en el mes destino, cae
+  al último día de ese mes — Postgres por defecto desborda al mes siguiente).
+- Los 5 sitios que combinaban `business_today()`/`business_day()` con el
+  modificador `date(x,'±N day'|'±N month')` de SQLite (sin equivalente en
+  Postgres) se tradujeron a mano con el mismo patrón ya usado en
+  `barberiaAvailability.js` (dos strings SQL, elegidos con un ternario sobre
+  `process.env.DATABASE_URL`): `routes/taller.js`, `routes/ganaderia.js`,
+  `services/ganaderiaService.js` (×2), `services/carwashService.js` (×2, uno
+  de ellos también traduce `MAX(a,b)` escalar de SQLite a `GREATEST(a,b)` de
+  Postgres). El resto de los 7 archivos ya documentados (`routes/barberia.js`,
+  `routes/carwash.js`, `services/reports.js`) no necesitaron ningún cambio:
+  una vez que las funciones existen en Postgres, el mismo texto SQL sirve
+  para los dos motores.
+- `services/businessClock.js` (el `db.function()` de SQLite) sigue sin
+  tocarse — solo se instala en la rama SQLite de `db.js`, nunca en la de
+  Postgres, así que no hay conflicto entre las dos implementaciones.
+
+### Dos bugs adicionales encontrados DURANTE esta validación (ya corregidos)
+
+1. **Postgres pliega a minúsculas los alias SQL sin comillas.** `AS tenantId`
+   se convierte en la columna `tenantid` (no `tenantId`) a menos que el alias
+   vaya entre comillas dobles (`AS "tenantId"`) — SQLite no hace esto, así que
+   el código nunca lo había necesitado. Rompía en silencio la resolución de
+   identidad de WhatsApp (`identityResolver.js`: `identity.tenantId`/
+   `identity.businessType` quedaban `undefined`) y el estado de vinculación
+   (`identityService.js`: `phoneNumber`/`updatedAt`/`linkedUserName`).
+   Corregido poniendo esos alias entre comillas dobles — funciona igual en
+   los dos motores.
+2. **`pg` devuelve `DATE`/`TIMESTAMP(TZ)` como objeto `Date` de JS por
+   defecto**, no como el string plano que siempre dio better-sqlite3 (y que
+   el código asume — p. ej. `action.created_at.replace(' ','T')+'Z'` en
+   `ai/core/orchestrator.js` rompía con un `Date`, que no tiene `.replace`).
+   Corregido con `pg.types.setTypeParser` para los OID 1082/1114/1184 (date/
+   timestamp/timestamptz), devolviendo el string plano `'YYYY-MM-DD'` /
+   `'YYYY-MM-DD HH:MM:SS'` igual que siempre. Ligado a esto: el `Pool` ahora
+   fija `options: '-c TimeZone=UTC'` — sin eso, Postgres interpretaría un
+   string de fecha-hora sin zona (`'2026-09-21 02:00:00'`) usando el
+   `TimeZone` de sesión del servidor en vez de UTC, que es lo que el código
+   (JS y SQLite) siempre asumió.
+
+### Un problema de timing en un test, no de la migración
+
+El test de rate limiting de WhatsApp (12b en `tests/whatsapp.js`) asumía que
+la respuesta a los 21 mensajes enviados en ráfaga llegaría en el MISMO orden
+en que se enviaron, y que la última en llegar sería la cortada por el
+limitador. Eso era cierto por accidente bajo SQLite (todo corre
+efectivamente serializado por ser síncrono), pero no es una garantía real
+del sistema: bajo Postgres, el procesamiento en segundo plano de cada
+webhook (`fire-and-forget`, ver `routes/whatsapp.js`) hace E/S real contra la
+base y las 21 respuestas pueden completarse en otro orden. Se corrigió la
+aserción para verificar que ALGUNA de las 21 respuestas fue cortada por el
+limitador (el invariante real que importa), no específicamente la última.
 
 ## Qué está hecho y verificado
 
@@ -28,11 +126,11 @@ Actualizado el 27 de octubre de 2026.
 
 **Todos** los archivos de rutas/servicios que tocan `db` están convertidos a `async`/`await` y verificados contra la suite completa (526 checks, 13 suites, cero regresión en cada paso): los 5 rubros completos (Taller, Barbería, Agro, Ganadería, Carwash), auth/passwords/staff, todo el AI Core (`toolRegistry`, `orchestrator`, `chatService`, `history`), todo el subsistema WhatsApp (`identityService`, `identityResolver`, `confirmationIntent`, las rutas del webhook y de vinculación), `utils/crud.js`, `settings.js`, `reports.js`, `routes/operations.js`, y `seed.js` (incluida la reescritura de `date('now','+N day')` a JavaScript — ver abajo). El arranque del servidor en `index.js` también se ajustó: `ensureSeed()` ahora es async, así que `app.listen(...)` espera a que termine antes de aceptar conexiones (antes era síncrono y bloqueante; ahora es un `.then()` sobre la promesa, con el mismo `process.exit(1)` si falla).
 
-**Lo único sin convertir, a propósito:**
-- `services/businessClock.js` — es quien REGISTRA `business_day()`/`business_today()` vía `db.function()`. No se toca hasta resolver la decisión de diseño de abajo.
+**Lo único sin convertir, a propósito (y no hace falta):**
+- `services/businessClock.js` — es quien REGISTRA `business_day()`/`business_today()` vía `db.function()`, solo para la rama SQLite de `db.js`. La rama Postgres usa las funciones SQL reales de `supabase/migrations/20261027140009_business_clock.sql` en su lugar — ver la sección "FASE 2 COMPLETA" arriba.
 - `maintenance/restore.js` / `maintenance/backups.js` — herramienta de respaldo específica de SQLite, sin equivalente en Postgres (Supabase maneja sus propios respaldos). No aplica.
 
-**Aun así, NO definir `DATABASE_URL` en ningún entorno real todavía** — ver el punto sin resolver de `business_day()`/`business_today()` más abajo: los 7 archivos que los usan funcionan bien contra SQLite (sintaxis nativa), pero esa sintaxis no existe en Postgres.
+**`DATABASE_URL` sigue sin definirse en ningún entorno real** — ya no por nada técnico (ver "FASE 2 COMPLETA" arriba), sino porque falta la Fase 3 (RLS) y la decisión del usuario de activar el corte.
 
 ### Prueba de extremo a extremo contra Postgres real (29 de octubre de 2026)
 
@@ -44,7 +142,7 @@ Se levantó un PostgreSQL 17 real (imagen oficial de Supabase, contenedor desech
 - `/api/taller/finanzas/resumen` (usa `business_day()`/`business_today()`) falló exactamente como se esperaba — `error: function business_day(text, bigint) does not exist` — un error de SQL visible en el log del servidor, no un dato incorrecto servido en silencio. Confirma que el único hueco real es el ya documentado, y que falla de forma segura (500 + log), no silenciosa.
 - Esta prueba encontró y corrigió un bug real en el adaptador: `ensureSchema()` (el bootstrap que aplica `supabase/migrations/`) se lanzaba al cargar el módulo pero nada esperaba esa promesa antes de la primera consulta real — `seed.js` intentaba leer `tenants` antes de que las migraciones terminaran de aplicarse (`relation "tenants" does not exist`). Corregido: `prepare()...exec()` y `runTransaction()` ahora hacen `await ready` antes de ejecutar cualquier consulta — costo cero una vez resuelta la primera vez.
 
-Conclusión: con el único hueco de `business_day`/`business_today` resuelto, el corte a Postgres debería funcionar de punta a punta sin sorpresas adicionales.
+Conclusión de esta prueba (29 de octubre, primera corrida): con el único hueco de `business_day`/`business_today` resuelto, el corte a Postgres debería funcionar de punta a punta sin sorpresas adicionales — confirmado después: ver "FASE 2 COMPLETA" al inicio del documento.
 
 ### Patrón mecánico de conversión (repetir por archivo)
 
@@ -62,17 +160,9 @@ Conclusión: con el único hueco de `business_day`/`business_today` resuelto, el
 ### Una excepción de sintaxis SQL ya resuelta, y una categoría de huecos SIN resolver (sí hay que volver a esto)
 
 - **Resuelto** — `server/src/services/barberiaAvailability.js`, función `assertAvailable`: `strftime('%w', ?)` (día de la semana en SQLite) se traduce a mano según el driver activo (`process.env.DATABASE_URL`) a `EXTRACT(DOW FROM ?::date)::integer` — misma convención 0=domingo..6=sábado en los dos motores. Patrón a repetir si aparece otro `strftime`.
-- **SIN resolver — `business_day()` / `business_today()`**: son funciones SQL registradas en SQLite vía `db.function()` (ver `services/businessClock.js`), que no existen en PostgreSQL. Se usan, casi siempre combinadas con el modificador de fecha de SQLite `date(x, '+N day'|'-N day'|'+N month')` (que tampoco existe en Postgres), en: `routes/barberia.js`, `routes/taller.js`, `routes/ganaderia.js`, `routes/carwash.js`, `services/reports.js`, `services/ganaderiaService.js`, `services/carwashService.js`. Antes de activar `DATABASE_URL` hace falta UNA de estas dos soluciones (no es mecánico, es una decisión de diseño):
-  - Crear `business_today(tenant_id)`/`business_day(valor, tenant_id)` como funciones reales de PostgreSQL (nueva migración en `supabase/migrations/`), consultando `tenant_settings` y usando `AT TIME ZONE` para la conversión — y traducir cada `date(x, '+N day')` a aritmética de intervalos (`(x::date + interval 'N days')::date`), consulta por consulta.
-  - O calcular el día de negocio en JavaScript (reutilizando `businessClock.day()`) y filtrar/agrupar esas consultas del lado de la aplicación en vez de inline en SQL.
+- **Resuelto — `business_day()` / `business_today()`**: ver la sección "FASE 2 COMPLETA" al inicio del documento para el detalle completo (Opción A: funciones reales de Postgres).
 - **Resuelto** — `server/src/seed.js`: ya no usa el minilenguaje de modificadores de fecha de SQLite. Se agregaron los helpers `addDays(n)`/`addMonths(n)` (calculan la fecha en JavaScript con `Date`/`setUTCDate`/`setUTCMonth`) y se pasan como parámetro `?` en vez de interpolar el modificador en el SQL. `seed.js` SÍ corre en los tests (`NODE_ENV=test`), así que esto bloqueaba validar contra Postgres y ya está resuelto.
 
-### Lo único que falta antes de poder activar `DATABASE_URL`
+### Siguiente paso
 
-**Una sola decisión de diseño pendiente**: `business_day()`/`business_today()` (ver arriba) en `routes/barberia.js`, `routes/taller.js`, `routes/ganaderia.js`, `routes/carwash.js`, `services/reports.js`, `services/ganaderiaService.js`, `services/carwashService.js`. Elegir una de las dos soluciones ya descritas (funciones reales de Postgres vía nueva migración, o calcular el día de negocio en JavaScript) y aplicarla en esos 7 archivos — es la única pieza que impide hoy correr la suite completa contra una Postgres real de punta a punta.
-
-### Cómo validar cuando esté resuelto el punto de arriba
-
-1. `node tests/run-isolated.js` sin `DATABASE_URL` (SQLite) → debe seguir en 526/526, cero regresión (ya se confirma así con cada archivo convertido).
-2. Levantar un Postgres efímero (`docker run ... public.ecr.aws/supabase/postgres:17.6.1.134` o `postgres:16`), extender `tests/run-isolated.js` (o correrlo a mano por suite) pasando `DATABASE_URL` en vez de `DATABASE_PATH` en el `env` de cada proceso lanzado — el arnés ya es agnóstico del motor porque prueba por HTTP contra el server real. Mismas 13 suites, mismos 526 checks, deben pasar igual contra Postgres. (Con la conversión ya completa, esto debería funcionar en cuanto se resuelva `business_day`/`business_today` — vale la pena intentarlo primero para ver si aparece algo más antes de invertir en la solución de diseño.)
-3. Solo entonces seguir con la Fase 3 (RLS) de `docs/MIGRACION-SUPABASE-POSTGRES.md`.
+Ya no queda nada pendiente de esta fase. El siguiente paso es la Fase 3 (RLS) de `docs/MIGRACION-SUPABASE-POSTGRES.md`.

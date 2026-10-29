@@ -24,9 +24,9 @@ function check(label, condition, detail = '') {
   }
 }
 
-function crearTenantDePrueba(tag) {
+async function crearTenantDePrueba(tag) {
   const slug = `qa-taller-hardening-${tag}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-  const info = db
+  const info = await db
     .prepare(`INSERT INTO tenants (business_type, nombre_empresa, slug, plan, status) VALUES ('taller', ?, ?, 'pro', 'activo')`)
     .run(`QA Taller Hardening ${tag}`, slug);
   return info.lastInsertRowid;
@@ -34,9 +34,9 @@ function crearTenantDePrueba(tag) {
 
 async function testAcentos(tenantId) {
   console.log('\n=== Hallazgo 2: búsqueda de clientes sin distinguir acentos ===');
-  db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'Carlos Ramírez');
-  db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'José Peña');
-  db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'Ana Pena');
+  await db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'Carlos Ramírez');
+  await db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'José Peña');
+  await db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'Ana Pena');
 
   const exact = await tallerService.buscarCliente(tenantId, { nombre: 'Carlos Ramírez' });
   check('"Carlos Ramírez" encuentra "Carlos Ramírez" (coincidencia exacta)', exact.some((c) => c.nombre === 'Carlos Ramírez'));
@@ -61,7 +61,7 @@ async function testAcentos(tenantId) {
 }
 
 async function testAcentosAislamientoTenant(tenantA, tenantB) {
-  db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantB, 'Carlos Ramírez');
+  await db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantB, 'Carlos Ramírez');
   const resultado = await tallerService.buscarCliente(tenantA, { nombre: 'Ramirez' });
   check(
     'Tenant A nunca encuentra un cliente de Tenant B, ni con la búsqueda normalizada',
@@ -90,10 +90,10 @@ async function withForcedFailure(sqlSubstring, fn) {
 
 async function testTransaccion(tenantId) {
   console.log('\n=== Hallazgo 4: registrarVenta debe ser atómico ===');
-  const ventasAntes = db.prepare('SELECT COUNT(*) as n FROM taller_ventas WHERE tenant_id = ?').get(tenantId).n;
-  const itemsAntes = db
+  const ventasAntes = (await db.prepare('SELECT COUNT(*) as n FROM taller_ventas WHERE tenant_id = ?').get(tenantId)).n;
+  const itemsAntes = (await db
     .prepare('SELECT COUNT(*) as n FROM taller_venta_items vi JOIN taller_ventas v ON v.id = vi.venta_id WHERE v.tenant_id = ?')
-    .get(tenantId).n;
+    .get(tenantId)).n;
 
   let threw = false;
   try {
@@ -108,10 +108,10 @@ async function testTransaccion(tenantId) {
   }
   check('registrarVenta lanza cuando el INSERT de ítems falla a mitad de camino', threw);
 
-  const ventasDespues = db.prepare('SELECT COUNT(*) as n FROM taller_ventas WHERE tenant_id = ?').get(tenantId).n;
-  const itemsDespues = db
+  const ventasDespues = (await db.prepare('SELECT COUNT(*) as n FROM taller_ventas WHERE tenant_id = ?').get(tenantId)).n;
+  const itemsDespues = (await db
     .prepare('SELECT COUNT(*) as n FROM taller_venta_items vi JOIN taller_ventas v ON v.id = vi.venta_id WHERE v.tenant_id = ?')
-    .get(tenantId).n;
+    .get(tenantId)).n;
 
   check('No quedó ninguna venta huérfana (el conteo de ventas no cambió)', ventasDespues === ventasAntes, `antes=${ventasAntes} después=${ventasDespues}`);
   check('No quedó ningún ítem huérfano (el conteo de ítems no cambió)', itemsDespues === itemsAntes, `antes=${itemsAntes} después=${itemsDespues}`);
@@ -124,29 +124,29 @@ async function testTransaccion(tenantId) {
   check('Control positivo: sin fallo forzado, la venta se crea con su ítem', venta.id && venta.items.length === 1 && venta.items[0].subtotal === 100);
 }
 
-function limpiar(tenants) {
+async function limpiar(tenants) {
   console.log('\n=== Limpieza de datos de prueba ===');
-  const run = db.transaction(() => {
+  const run = db.transaction(async () => {
     for (const tid of tenants) {
-      db.prepare('DELETE FROM taller_venta_items WHERE venta_id IN (SELECT id FROM taller_ventas WHERE tenant_id = ?)').run(tid);
-      db.prepare('DELETE FROM taller_ventas WHERE tenant_id = ?').run(tid);
-      db.prepare('DELETE FROM taller_clientes WHERE tenant_id = ?').run(tid);
+      await db.prepare('DELETE FROM taller_venta_items WHERE venta_id IN (SELECT id FROM taller_ventas WHERE tenant_id = ?)').run(tid);
+      await db.prepare('DELETE FROM taller_ventas WHERE tenant_id = ?').run(tid);
+      await db.prepare('DELETE FROM taller_clientes WHERE tenant_id = ?').run(tid);
     }
-    db.prepare(`DELETE FROM tenants WHERE id IN (${tenants.map(() => '?').join(',')})`).run(...tenants);
+    await db.prepare(`DELETE FROM tenants WHERE id IN (${tenants.map(() => '?').join(',')})`).run(...tenants);
   });
-  run();
+  await run();
   console.log('  listo');
 }
 
 async function main() {
-  const tenantA = crearTenantDePrueba('a');
-  const tenantB = crearTenantDePrueba('b');
+  const tenantA = await crearTenantDePrueba('a');
+  const tenantB = await crearTenantDePrueba('b');
   try {
     await testAcentos(tenantA);
     await testAcentosAislamientoTenant(tenantA, tenantB);
     await testTransaccion(tenantA);
   } finally {
-    limpiar([tenantA, tenantB]);
+    await limpiar([tenantA, tenantB]);
   }
 
   console.log(`\n=== Resultado: ${pass}/${pass + fail} checks OK ===`);

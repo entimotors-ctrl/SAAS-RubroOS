@@ -6,7 +6,6 @@ const definitions={
  ganaderia:{sql:'SELECT p.id,p.fecha,p.turno,a.arete,p.litros,p.version FROM ganaderia_produccion_leche p JOIN ganaderia_animales a ON a.id=p.animal_id AND a.tenant_id=p.tenant_id WHERE p.tenant_id=?',stamp:'fecha',amount:'litros',label:'Litros registrados'},
  carwash:{sql:"SELECT id,entregado_at,cliente_id,servicio_id,precio,metodo_pago,usa_membresia FROM carwash_turnos WHERE tenant_id=? AND estado='entregado'",stamp:'entregado_at',amount:'precio',label:'Lavados entregados'}
 };
-// NOTA Fase 2 (Postgres): business_day() — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
 async function rows(tid,type,from,to){date(from);date(to);const {ServiceError}=require('./errors');if(from>to)throw new ServiceError('Rango de fechas inválido');const d=definitions[type];if(!d)throw new ServiceError('Rubro inválido');const stamp=type==='ganaderia'?'p.fecha':d.stamp;const id=type==='ganaderia'?'p.tenant_id':'tenant_id';const result=await db.prepare(d.sql+` AND business_day(${stamp},${id}) BETWEEN ? AND ? ORDER BY ${stamp},${type==='ganaderia'?'p.id':'id'} LIMIT 10001`).all(tid,from,to);if(result.length>10000)throw new ServiceError('El reporte supera 10 000 registros. Selecciona un período menor.');return result;}
 
 async function report(tid,type,from,to){const r=await rows(tid,type,from,to),d=definitions[type];return {desde:from,hasta:to,zona_horaria:(await settings.get(tid)).timezone,etiqueta:d.label,unidad:type==='ganaderia'?'litros':'L',cantidad:r.length,total:Math.round(r.reduce((a,v)=>a+Number(v[d.amount]),0)*100)/100,rows:r};}

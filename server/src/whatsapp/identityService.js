@@ -12,9 +12,12 @@ function generateCode() {
 
 /** Estado del vínculo del tenant — nunca incluye el código de verificación. */
 async function getStatus(tenantId) {
+  // Alias camelCase entre comillas dobles: sin ellas Postgres los pliega a
+  // minúsculas (phonenumber, no phoneNumber) y row.phoneNumber/etc quedarían
+  // undefined — ver la misma nota en identityResolver.js.
   const row = await db
     .prepare(
-      `SELECT wi.phone_number AS phoneNumber, wi.status AS status, wi.updated_at AS updatedAt, u.nombre AS linkedUserName
+      `SELECT wi.phone_number AS "phoneNumber", wi.status AS status, wi.updated_at AS "updatedAt", u.nombre AS "linkedUserName"
        FROM whatsapp_identities wi JOIN users u ON u.id = wi.user_id
        WHERE wi.tenant_id = ? AND wi.status IN ('active','pending')
        ORDER BY wi.id DESC LIMIT 1`

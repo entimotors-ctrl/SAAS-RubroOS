@@ -25,12 +25,32 @@ async function freePort() {
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve)); return port;
 }
+// TEST_DATABASE_URL (opcional): base de conexión SIN nombre de base, p.ej.
+// postgres://postgres:postgres@127.0.0.1:5433 — si está definida, cada suite
+// corre contra una base PostgreSQL propia (creada/recreada aquí) en vez de un
+// archivo SQLite, para validar el adaptador de server/src/db/postgres.js con
+// el mismo arnés. Sin esta variable, el comportamiento es idéntico al de
+// siempre (SQLite).
+const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+async function pgDatabaseUrl(name) {
+  const { Client } = require('pg');
+  const dbName = name.replace(/-/g, '_');
+  const admin = new Client({ connectionString: `${TEST_DATABASE_URL}/postgres` });
+  await admin.connect();
+  await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
+  await admin.query(`CREATE DATABASE ${dbName}`);
+  await admin.end();
+  return `${TEST_DATABASE_URL}/${dbName}`;
+}
 (async () => {
   let failed = false;
   for (const name of ['functional-smoke','security-multitenant','ai-core','ai-chat','whatsapp','taller-hardening','whatsapp-empty-pending','release-foundation','migration-safety','release-http','multi-business-beta','stable-operations','staff-portal']) {
     if(process.argv.length>2&&!process.argv.slice(2).includes(name))continue;
     const port = await freePort();
-    const env = { ...process.env, NODE_ENV:'test', DATABASE_PATH:path.join(root, name+'.db'), JWT_SECRET:'isolated-regression-key', OWNER_EMAIL:'owner@audit.test', OWNER_SEED_PASSWORD:'Isolated-test-password!', AI_FAKE_PROVIDER:'1', WHATSAPP_FAKE_TRANSPORT:'1', WHATSAPP_APP_SECRET:'testsecret', WHATSAPP_VERIFY_TOKEN:'testverify', WHATSAPP_PHONE_NUMBER_ID:'PNID_TEST_SUITE', WHATSAPP_ACCESS_TOKEN:'fake-only', PORT:String(port), HOST:'127.0.0.1', API_URL:`http://127.0.0.1:${port}/api` };
+    const dbEnv = TEST_DATABASE_URL
+      ? { DATABASE_URL: await pgDatabaseUrl(name), MIGRATIONS_DIR: path.join(source, '..', 'supabase', 'migrations') }
+      : { DATABASE_PATH: path.join(root, name+'.db') };
+    const env = { ...process.env, NODE_ENV:'test', ...dbEnv, JWT_SECRET:'isolated-regression-key', OWNER_EMAIL:'owner@audit.test', OWNER_SEED_PASSWORD:'Isolated-test-password!', AI_FAKE_PROVIDER:'1', WHATSAPP_FAKE_TRANSPORT:'1', WHATSAPP_APP_SECRET:'testsecret', WHATSAPP_VERIFY_TOKEN:'testverify', WHATSAPP_PHONE_NUMBER_ID:'PNID_TEST_SUITE', WHATSAPP_ACCESS_TOKEN:'fake-only', PORT:String(port), HOST:'127.0.0.1', API_URL:`http://127.0.0.1:${port}/api` };
     const api = launch(['src/index.js'], env);
     const apiFinished = finish(api);
     try {

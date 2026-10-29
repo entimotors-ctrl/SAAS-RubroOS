@@ -7,20 +7,20 @@ const history = require('../src/ai/core/history');
 const { tryHandle } = require('../src/whatsapp/confirmationIntent');
 
 (async () => {
-  const tenantId = Number(db.prepare("INSERT INTO tenants (business_type, nombre_empresa, slug) VALUES ('taller', 'Regression', 'regression')").run().lastInsertRowid);
+  const tenantId = Number((await db.prepare("INSERT INTO tenants (business_type, nombre_empresa, slug) VALUES ('taller', 'Regression', 'regression')").run()).lastInsertRowid);
   const context = { tenantId, businessType: 'taller', role: 'tenant_admin' };
   const conversation = await history.createConversation({ tenantId, channel: 'whatsapp' });
   let checks = 0;
   for (const status of [null, 'rejected', 'executed']) {
     if (status) await history.createAction({ conversationId: conversation.id, tenantId, toolName: 'taller.registrarVenta', args: {}, status });
-    const before = db.prepare('SELECT * FROM ai_actions').all();
+    const before = await db.prepare('SELECT * FROM ai_actions').all();
     for (const text of ['Cancelar 1', 'Cancelar 2', 'no 2', 'cancelar todo', 'sí', 'no', 'confirmar', '2', '9']) {
       const count = (await history.listMessages(conversation.id, tenantId)).length;
       const result = await tryHandle({ context, conversation, text });
       assert.ok(result, `${text}, state=${status}: must not fall through to LLM`);
       assert.match(result.message, /no hay acciones pendientes/i);
       assert.equal((await history.listMessages(conversation.id, tenantId)).length, count + 2);
-      assert.deepEqual(db.prepare('SELECT * FROM ai_actions').all(), before);
+      assert.deepEqual(await db.prepare('SELECT * FROM ai_actions').all(), before);
       checks++;
     }
   }

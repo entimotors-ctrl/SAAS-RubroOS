@@ -59,15 +59,16 @@ router.post('/ventas/:id/abonos', async (req, res, next) => {
   }
 });
 
-// NOTA Fase 2 (Postgres): business_day()/business_today() — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
 router.get('/finanzas/resumen', async (req, res) => {
   const tenantId = req.user.tenant_id;
   const hoy = (await db
     .prepare("SELECT COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) = business_today(tenant_id)")
     .get(tenantId)).total;
-  const semana = await db
-    .prepare("SELECT business_day(created_at,tenant_id) AS dia, COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) >= date(business_today(tenant_id),'-6 day') GROUP BY dia ORDER BY dia")
-    .all(tenantId);
+  // date(x,'-6 day') (SQLite) -> x - 6 (Postgres: date - integer = date).
+  const semanaSql = process.env.DATABASE_URL
+    ? "SELECT business_day(created_at,tenant_id) AS dia, COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) >= business_today(tenant_id) - 6 GROUP BY dia ORDER BY dia"
+    : "SELECT business_day(created_at,tenant_id) AS dia, COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) >= date(business_today(tenant_id),'-6 day') GROUP BY dia ORDER BY dia";
+  const semana = await db.prepare(semanaSql).all(tenantId);
   const creditoPendiente = (await db
     .prepare("SELECT COALESCE(SUM(saldo),0) AS total FROM taller_ventas WHERE tenant_id = ? AND estado = 'credito_abierto'")
     .get(tenantId)).total;

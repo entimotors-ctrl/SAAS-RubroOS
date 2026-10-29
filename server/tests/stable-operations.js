@@ -4,11 +4,11 @@ let n=0;const check=(a,b)=>{assert.deepEqual(a,b);n++;};
 const users={},tokens={};
 async function req(type,path,method='GET',body){const r=await fetch(process.env.API_URL+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+tokens[type]},body:body===undefined?undefined:JSON.stringify(body)});const t=await r.text();let value;try{value=JSON.parse(t);}catch{value=t;}return {status:r.status,body:value};}
 (async()=>{
- for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');users[type]=u;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
- const owner=db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=await signToken({sub:owner.id,role:'owner'});
+ for(const type of ['taller','barberia','agro','ganaderia','carwash']){const u=await db.prepare('SELECT * FROM users WHERE business_type=? AND email=?').get(type,'maestro@rubroos.test');users[type]=u;tokens[type]=await signToken({sub:u.id,tenant_id:u.tenant_id,business_type:type,role:u.role});}
+ const owner=await db.prepare("SELECT * FROM users WHERE role='owner'").get();tokens.owner=await signToken({sub:owner.id,role:'owner'});
  check((await req('owner','/ready')).status,200);
  check((await req('owner','/owner/system')).body.backups.enabled,false);
- const staffid=db.prepare("INSERT INTO users(tenant_id,business_type,email,password_hash,nombre,role) VALUES(?,?,?,?,?,'tenant_staff')").run(users.agro.tenant_id,'agro','stable-staff@test.example',users.agro.password_hash,'Staff').lastInsertRowid;
+ const staffid=(await db.prepare("INSERT INTO users(tenant_id,business_type,email,password_hash,nombre,role) VALUES(?,?,?,?,?,'tenant_staff')").run(users.agro.tenant_id,'agro','stable-staff@test.example',users.agro.password_hash,'Staff')).lastInsertRowid;
  tokens.staff=await signToken({sub:staffid,tenant_id:users.agro.tenant_id,business_type:'agro',role:'tenant_staff'});
  check((await req('staff','/operations/settings','PUT',{fumigacion:1})).status,403);
  check((await req('staff','/operations/export')).status,403);
@@ -25,15 +25,15 @@ async function req(type,path,method='GET',body){const r=await fetch(process.env.
  check((await req('agro',`/agro/pedidos/${order.id}/cobrar`,'POST',{metodo_pago:'tarjeta'})).body.pagado,20);
  check((await req('agro',`/agro/pedidos/${order.id}/cobrar`,'POST',{metodo_pago:'efectivo'})).body.metodo_pago,'tarjeta');
  for(let i=0;i<2;i++)check((await req('agro',`/agro/pedidos/${order.id}/devolver`,'POST',{motivo:'Cliente devuelve todo'})).body.reembolsado,20);
- check(db.prepare('SELECT stock FROM agro_productos WHERE id=?').get(p.id).stock,5);
+ check((await db.prepare('SELECT stock FROM agro_productos WHERE id=?').get(p.id)).stock,5);
  check((await req('agro',`/agro/pedidos/${order.id}/estado`,'PUT',{estado:'entregado'})).status,409);
- check(db.prepare("SELECT COUNT(*) n FROM business_events WHERE event='agro.pedido.devuelto' AND entity_id=?").get(order.id).n,1);
+ check((await db.prepare("SELECT COUNT(*) n FROM business_events WHERE event='agro.pedido.devuelto' AND entity_id=?").get(order.id)).n,1);
  const animal=(await req('ganaderia','/ganaderia/animales','POST',{arete:'STABLE-001',nombre:'Test'})).body;
  const milk=(await req('ganaderia','/ganaderia/produccion','POST',{animal_id:animal.id,fecha:'2026-09-20',turno:'AM',litros:10})).body;
  const correct={fecha:'2026-09-20',turno:'AM',litros:12.5,motivo:'Lectura original equivocada',version:1};
  const corrected=await req('ganaderia',`/ganaderia/produccion/${milk.id}`,'PUT',correct);check(corrected.status,200);check(corrected.body.version,2);check(corrected.body.litros,12.5);
  check((await req('ganaderia',`/ganaderia/produccion/${milk.id}`,'PUT',correct)).status,409);
- check(db.prepare("SELECT COUNT(*) n FROM business_events WHERE event='ganaderia.ordeno.corregido' AND entity_id=?").get(milk.id).n,1);
+ check((await db.prepare("SELECT COUNT(*) n FROM business_events WHERE event='ganaderia.ordeno.corregido' AND entity_id=?").get(milk.id)).n,1);
  const report=await req('ganaderia','/operations/report?desde=2026-09-20&hasta=2026-09-20');check(report.body.rows.some(r=>r.id===milk.id),true);
  check((await req('ganaderia','/operations/report?desde=2026-02-30&hasta=2026-09-20')).status,400);
  const closure=await req('ganaderia','/operations/closures','POST',{fecha:'2026-09-20',notas:'Revisado por QA'});check(closure.status,201);
@@ -41,16 +41,22 @@ async function req(type,path,method='GET',body){const r=await fetch(process.env.
  check((await req('agro','/operations/closures')).body.length,0);
  check((await req('ganaderia','/operations/export?desde=2026-09-20&hasta=2026-09-20')).body.includes('STABLE-001'),true);
  check(require('../src/services/reports').csv([{value:'=HYPERLINK("x")'}]).includes("'=HYPERLINK"),true);
- check(db.prepare("SELECT business_day('2026-09-21 02:00:00',?) d").get(users.agro.tenant_id).d,'2026-09-20');
+ // El literal es ambiguo entre los dos overloads de business_day() en Postgres
+ // (timestamptz vs date) — se castea explícitamente para que resuelva al
+ // mismo overload que usan created_at/cobrada_at/entregado_at en la app real.
+ const businessDaySql = process.env.DATABASE_URL
+   ? "SELECT business_day('2026-09-21 02:00:00'::timestamptz,?) d"
+   : "SELECT business_day('2026-09-21 02:00:00',?) d";
+ check((await db.prepare(businessDaySql).get(users.agro.tenant_id)).d,'2026-09-20');
  check((await req('agro','/operations/settings','PUT',{timezone:'UTC'})).status,200);
- db.prepare('UPDATE agro_pedidos SET created_at=? WHERE id=?').run('2026-09-21 02:00:00',order.id);
+ await db.prepare('UPDATE agro_pedidos SET created_at=? WHERE id=?').run('2026-09-21 02:00:00',order.id);
  check((await req('agro','/operations/report?desde=2026-09-21&hasta=2026-09-21')).body.rows.some(r=>r.id===order.id),true);
  check((await req('agro','/operations/settings','PUT',{timezone:'America/Tegucigalpa'})).status,200);
  check((await req('agro','/operations/report?desde=2026-09-21&hasta=2026-09-21')).body.rows.some(r=>r.id===order.id),false);
  for(const type of Object.keys(users))check((await req(type,'/operations/report?desde=2026-01-01&hasta=2027-12-31')).status,200);
  check((await req('agro',`/owner/tenants/${users.agro.tenant_id}/users/${users.agro.id}/reset-link`,'POST',{})).status,403);
  const recovery=await req('owner',`/owner/tenants/${users.agro.tenant_id}/users/${users.agro.id}/reset-link`,'POST',{});check(recovery.status,200);
- check(db.prepare('SELECT token_hash FROM password_resets WHERE user_id=?').get(users.agro.id).token_hash===recovery.body.token,false);
+ check((await db.prepare('SELECT token_hash FROM password_resets WHERE user_id=?').get(users.agro.id)).token_hash===recovery.body.token,false);
  check((await req('agro','/auth/reset-password','POST',{token:recovery.body.token,password:'Recovery-secure-2026!'})).status,200);
  check((await req('agro','/operations/settings')).status,401);
  check((await req('agro','/auth/reset-password','POST',{token:recovery.body.token,password:'Recovery-secure-2027!'})).status,400);
@@ -58,9 +64,15 @@ async function req(type,path,method='GET',body){const r=await fetch(process.env.
  check((await req('agro','/auth/change-password','POST',{current_password:'wrong',password:'Another-secure-2026!'})).status,400);
  check((await req('agro','/auth/change-password','POST',{current_password:'Recovery-secure-2026!',password:'Another-secure-2026!'})).status,200);
  check((await req('agro','/operations/settings')).status,401);
- const expired=await req('owner',`/owner/tenants/${users.agro.tenant_id}/users/${users.agro.id}/reset-link`,'POST',{});db.prepare('UPDATE password_resets SET expires_at=0 WHERE user_id=?').run(users.agro.id);
+ const expired=await req('owner',`/owner/tenants/${users.agro.tenant_id}/users/${users.agro.id}/reset-link`,'POST',{});await db.prepare('UPDATE password_resets SET expires_at=0 WHERE user_id=?').run(users.agro.id);
  check((await req('agro','/auth/reset-password','POST',{token:expired.body.token,password:'Expired-secure-2026!'})).status,400);
+ // maintenance/backups.js y restore.js son herramientas específicas de
+ // better-sqlite3 (usan db.backup() nativo) sin equivalente en Postgres
+ // (Supabase maneja sus propios respaldos) — se omiten a propósito bajo
+ // DATABASE_URL, ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
+ if (!process.env.DATABASE_URL) {
  const fs=require('fs'),os=require('os'),path=require('path'),Database=require('better-sqlite3');const folder=fs.mkdtempSync(path.join(os.tmpdir(),'rubroos-backup-qa-'));
- try{const backups=require('../src/maintenance/backups');for(let i=0;i<3;i++)await backups.backup(db,folder,2);const names=fs.readdirSync(folder);check(names.length,2);const copy=new Database(path.join(folder,names[0]),{readonly:true});check(copy.pragma('quick_check',{simple:true}),'ok');check(copy.prepare('SELECT COUNT(*) n FROM users').get().n,db.prepare('SELECT COUNT(*) n FROM users').get().n);copy.close();const restore=require('../src/maintenance/restore');const restored=path.join(folder,'restored.db');await restore(path.join(folder,names[0]),restored);const rd=new Database(restored,{readonly:true});check(rd.prepare('SELECT COUNT(*) n FROM users').get().n,db.prepare('SELECT COUNT(*) n FROM users').get().n);rd.close();await assert.rejects(()=>restore(path.join(folder,names[0]),restored),/destino ya existe/);n++;const corrupt=path.join(folder,'corrupt.db');fs.writeFileSync(corrupt,'invalid database');await assert.rejects(()=>restore(corrupt,path.join(folder,'bad.db')));n++;check(fs.existsSync(path.join(folder,'bad.db')),false);}finally{fs.rmSync(folder,{recursive:true,force:true});}
+ try{const backups=require('../src/maintenance/backups');for(let i=0;i<3;i++)await backups.backup(db,folder,2);const names=fs.readdirSync(folder);check(names.length,2);const copy=new Database(path.join(folder,names[0]),{readonly:true});check(copy.pragma('quick_check',{simple:true}),'ok');check(copy.prepare('SELECT COUNT(*) n FROM users').get().n,(await db.prepare('SELECT COUNT(*) n FROM users').get()).n);copy.close();const restore=require('../src/maintenance/restore');const restored=path.join(folder,'restored.db');await restore(path.join(folder,names[0]),restored);const rd=new Database(restored,{readonly:true});check(rd.prepare('SELECT COUNT(*) n FROM users').get().n,(await db.prepare('SELECT COUNT(*) n FROM users').get()).n);rd.close();await assert.rejects(()=>restore(path.join(folder,names[0]),restored),/destino ya existe/);n++;const corrupt=path.join(folder,'corrupt.db');fs.writeFileSync(corrupt,'invalid database');await assert.rejects(()=>restore(corrupt,path.join(folder,'bad.db')));n++;check(fs.existsSync(path.join(folder,'bad.db')),false);}finally{fs.rmSync(folder,{recursive:true,force:true});}
+ }
  console.log(`${n}/${n} checks OK`);
 })().catch(e=>{console.error(e);process.exitCode=1;});

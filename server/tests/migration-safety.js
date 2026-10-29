@@ -25,7 +25,16 @@ try {
   assert.equal(backup.prepare('SELECT descripcion FROM taller_venta_items').get().descripcion,'Legacy service');
   assert.equal(backup.prepare('PRAGMA table_info(taller_venta_items)').all().some(c=>c.name==='producto_id'),false);backup.close();
   migrate(db,file);assert.equal(fs.readdirSync(path.join(folder,'backups')).filter(f => f.endsWith('.db')).length,1);
-  const result=spawnSync(process.execPath,['-e',"require('./src/seed').ensureSeed(); const db=require('./src/db'); if(db.prepare('SELECT COUNT(*) AS n FROM tenants').get().n !== 0) process.exit(1); if(db.prepare(\"SELECT COUNT(*) AS n FROM users WHERE role != 'owner'\").get().n !== 0) process.exit(2);"], {cwd:path.resolve(__dirname,'..'),env:{...process.env,NODE_ENV:'production',DATABASE_PATH:':memory:',OWNER_EMAIL:'test@local.test',OWNER_SEED_PASSWORD:'Test-only-production-seed'}});
+  // Esta sub-prueba ejercita específicamente el arranque en modo producción
+  // con SQLite puro (DATABASE_PATH=':memory:'); si el proceso padre corre
+  // bajo el arnés de Postgres (TEST_DATABASE_URL), hay que quitar
+  // DATABASE_URL del entorno heredado o el hijo usaría ese adaptador en vez
+  // de SQLite y la aserción síncrona de abajo (sin await) dejaría de aplicar.
+  const envSinPostgres={...process.env};delete envSinPostgres.DATABASE_URL;
+  // ensureSeed() es async (toda la capa de datos lo es desde la Fase 2) — hay
+  // que esperarla antes de leer, o las lecturas de abajo correrían antes de
+  // que termine de sembrar.
+  const result=spawnSync(process.execPath,['-e',"require('./src/seed').ensureSeed().then(() => { const db=require('./src/db'); if(db.prepare('SELECT COUNT(*) AS n FROM tenants').get().n !== 0) process.exit(1); if(db.prepare(\"SELECT COUNT(*) AS n FROM users WHERE role != 'owner'\").get().n !== 0) process.exit(2); }).catch((e) => { console.error(e); process.exit(3); });"], {cwd:path.resolve(__dirname,'..'),env:{...envSinPostgres,NODE_ENV:'production',DATABASE_PATH:':memory:',OWNER_EMAIL:'test@local.test',OWNER_SEED_PASSWORD:'Test-only-production-seed'}});
   assert.equal(result.status,0,result.stderr?.toString());
   console.log('8/8 checks OK');
 } finally {db.close();fs.rmSync(folder,{recursive:true,force:true});}

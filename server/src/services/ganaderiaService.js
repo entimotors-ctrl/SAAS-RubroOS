@@ -18,24 +18,25 @@ async function registrarProduccion(tenantId, { animal_id, fecha, turno='AM', lit
 
 // ---- Lecturas (reutilizadas por la API REST y por las tools de IA) ----
 
-// NOTA Fase 2 (Postgres): business_today() + date(x,'-6 day') — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
 async function resumenProduccion(tenantId) {
   const hoy = (await db
     .prepare("SELECT COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche WHERE tenant_id = ? AND fecha = business_today(tenant_id)")
     .get(tenantId)).litros;
-  const semana = await db
-    .prepare(
-      `SELECT fecha, COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche
-       WHERE tenant_id = ? AND fecha >= date(business_today(tenant_id),'-6 day') GROUP BY fecha ORDER BY fecha`
-    )
-    .all(tenantId);
-  const porAnimal = await db
-    .prepare(
-      `SELECT a.arete, a.nombre, COALESCE(SUM(p.litros),0) AS litros FROM ganaderia_animales a
-       LEFT JOIN ganaderia_produccion_leche p ON p.animal_id = a.id AND p.tenant_id = a.tenant_id AND p.fecha >= date(business_today(a.tenant_id),'-6 day')
+  // date(x,'-6 day') (SQLite) -> x - 6 (Postgres: date - integer = date).
+  const semanaSql = process.env.DATABASE_URL
+    ? `SELECT fecha, COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche
+       WHERE tenant_id = ? AND fecha >= business_today(tenant_id) - 6 GROUP BY fecha ORDER BY fecha`
+    : `SELECT fecha, COALESCE(SUM(litros),0) AS litros FROM ganaderia_produccion_leche
+       WHERE tenant_id = ? AND fecha >= date(business_today(tenant_id),'-6 day') GROUP BY fecha ORDER BY fecha`;
+  const semana = await db.prepare(semanaSql).all(tenantId);
+  const porAnimalSql = process.env.DATABASE_URL
+    ? `SELECT a.arete, a.nombre, COALESCE(SUM(p.litros),0) AS litros FROM ganaderia_animales a
+       LEFT JOIN ganaderia_produccion_leche p ON p.animal_id = a.id AND p.tenant_id = a.tenant_id AND p.fecha >= business_today(a.tenant_id) - 6
        WHERE a.tenant_id = ? GROUP BY a.id ORDER BY litros DESC`
-    )
-    .all(tenantId);
+    : `SELECT a.arete, a.nombre, COALESCE(SUM(p.litros),0) AS litros FROM ganaderia_animales a
+       LEFT JOIN ganaderia_produccion_leche p ON p.animal_id = a.id AND p.tenant_id = a.tenant_id AND p.fecha >= date(business_today(a.tenant_id),'-6 day')
+       WHERE a.tenant_id = ? GROUP BY a.id ORDER BY litros DESC`;
+  const porAnimal = await db.prepare(porAnimalSql).all(tenantId);
   const totalAnimales = (await db.prepare("SELECT COUNT(*) AS n FROM ganaderia_animales WHERE tenant_id = ? AND estado = 'activo'").get(tenantId)).n;
   return { litrosHoy: hoy, ultimaSemana: semana, porAnimal, totalAnimales };
 }

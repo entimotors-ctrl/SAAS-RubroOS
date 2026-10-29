@@ -23,12 +23,6 @@ router.use('/clientes', simpleCrud('barberia_clientes', ['nombre', 'telefono'], 
 router.get('/citas', async (req,res)=>res.json(await db.prepare('SELECT * FROM barberia_citas WHERE tenant_id=? ORDER BY fecha DESC,hora').all(req.user.tenant_id)));
 router.post('/citas',async (req,res,next)=>{try{res.status(201).json(await require('../services/barberiaAppointments').save(req.user.tenant_id,req.body||{}));}catch(e){next(e);}});
 router.put('/citas/:id',async (req,res,next)=>{try{res.json(await require('../services/barberiaAppointments').save(req.user.tenant_id,req.body||{},req.params.id));}catch(e){next(e);}});
-// NOTA Fase 2 (Postgres): business_day()/business_today() son funciones SQL
-// registradas con db.function() (ver services/businessClock.js) — solo
-// existen en better-sqlite3. Antes de activar DATABASE_URL hace falta
-// crearlas como funciones de PostgreSQL (migración nueva) replicando la
-// conversión de zona horaria por tenant_id, o reescribir estas consultas
-// para calcular el día de negocio en JavaScript. Ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
 router.get('/comisiones',async (req,res)=>res.json(await db.prepare(`SELECT b.id,b.nombre,b.comision_porcentaje,COUNT(c.id) AS cuentas,COALESCE(SUM(c.total),0) AS ventas,COALESCE(SUM(c.comision_total),0) AS comision FROM barberia_barberos b LEFT JOIN barberia_cuentas c ON c.barbero_id=b.id AND c.tenant_id=b.tenant_id AND c.estado='pagada' AND business_day(c.cobrada_at,b.tenant_id)=business_today(b.tenant_id) WHERE b.tenant_id=? GROUP BY b.id`).all(req.user.tenant_id)));
 
 router.post('/cobrar',async (req,res)=>res.status(201).json(await barberiaService.cerrarCuenta(req.user.tenant_id,req.body||{})));

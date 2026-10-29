@@ -18,9 +18,12 @@ async function resolve({ phoneNumberId, from }) {
   const phoneNumber = normalizePhoneNumber(from);
   if (!phoneNumberId || !phoneNumber) return null;
 
+  // Los alias camelCase van entre comillas dobles: sin comillas, Postgres los
+  // pliega a minúsculas (tenantid, no tenantId) y el código de arriba que lee
+  // identity.tenantId/businessType se rompería en silencio.
   const row = await db
     .prepare(
-      `SELECT wi.tenant_id AS tenantId, wi.user_id AS userId, u.role AS role, u.business_type AS businessType
+      `SELECT wi.tenant_id AS "tenantId", wi.user_id AS "userId", u.role AS role, u.business_type AS "businessType"
        FROM whatsapp_identities wi
        JOIN users u ON u.id = wi.user_id AND u.tenant_id = wi.tenant_id
        JOIN tenants t ON t.id = wi.tenant_id AND t.business_type = u.business_type
