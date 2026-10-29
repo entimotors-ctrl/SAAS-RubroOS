@@ -22,8 +22,6 @@ const carwashRoutes = require('./routes/carwash');
 const aiRoutes = require('./routes/ai');
 const whatsappIdentityRoutes = require('./routes/whatsappIdentity');
 
-require('./seed').ensureSeed();
-
 const app = express();
 
 app.use(helmet({contentSecurityPolicy:{directives:{'upgrade-insecure-requests':process.env.NODE_ENV==='production'?[]:null}}}));
@@ -98,7 +96,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Error interno del servidor' });
 });
 
+// ensureSeed() ya es async (Fase 2: toda la capa de datos lo es) — el
+// servidor solo empieza a aceptar conexiones después de que la cuenta owner
+// (y, en desarrollo, los tenants demo) queden creados. Si ensureSeed()
+// rechaza (p. ej. falta OWNER_SEED_PASSWORD), el proceso nunca llega a
+// escuchar — mismo comportamiento que el throw síncrono de antes.
 const PORT = process.env.PORT || 4000;
-const server=app.listen(PORT, process.env.LOCAL_DEMO === '1' ? '127.0.0.1' : process.env.HOST || '127.0.0.1', () => console.log(`RubroOS API escuchando en http://localhost:${PORT}`));
-
-for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{const backupsFinished=backupManager.stop();server.close(async()=>{await backupsFinished;db.close();process.exit(0);});setTimeout(()=>process.exit(1),25000).unref();});
+require('./seed').ensureSeed().then(() => {
+  const server = app.listen(PORT, process.env.LOCAL_DEMO === '1' ? '127.0.0.1' : process.env.HOST || '127.0.0.1', () => console.log(`RubroOS API escuchando en http://localhost:${PORT}`));
+  for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{const backupsFinished=backupManager.stop();server.close(async()=>{await backupsFinished;db.close();process.exit(0);});setTimeout(()=>process.exit(1),25000).unref();});
+}).catch((err) => { console.error(err); process.exit(1); });

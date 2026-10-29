@@ -65,6 +65,7 @@ function prepare(rawSql) {
   const translated = injectReturningId(translateSql(rawSql));
   const isInsertWithId = / RETURNING id$/.test(translated);
   async function exec(params) {
+    await ready; // el bootstrap de esquema (ensureSchema) debe terminar antes de la primera consulta real.
     const res = await client().query(translated, params);
     return res;
   }
@@ -89,6 +90,7 @@ function prepare(rawSql) {
 
 async function runTransaction(fn) {
   if (txContext.getStore()) return fn(); // ya hay una transacción ambiente: no abrir una anidada (ver comentario de diseño en docs).
+  await ready;
   const conn = await pool.connect();
   try {
     await conn.query('BEGIN');
