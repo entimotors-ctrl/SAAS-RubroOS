@@ -70,7 +70,7 @@ async function testAcentosAislamientoTenant(tenantA, tenantB) {
 }
 
 /** Fuerza que la SIGUIENTE llamada .run() de un statement que matchea `sqlSubstring` lance un error, para probar atomicidad sin dañar datos reales. Restaura db.prepare siempre. */
-function withForcedFailure(sqlSubstring, fn) {
+async function withForcedFailure(sqlSubstring, fn) {
   const originalPrepare = db.prepare.bind(db);
   db.prepare = (sql) => {
     const stmt = originalPrepare(sql);
@@ -82,13 +82,13 @@ function withForcedFailure(sqlSubstring, fn) {
     return stmt;
   };
   try {
-    return fn();
+    return await fn();
   } finally {
     db.prepare = originalPrepare;
   }
 }
 
-function testTransaccion(tenantId) {
+async function testTransaccion(tenantId) {
   console.log('\n=== Hallazgo 4: registrarVenta debe ser atómico ===');
   const ventasAntes = db.prepare('SELECT COUNT(*) as n FROM taller_ventas WHERE tenant_id = ?').get(tenantId).n;
   const itemsAntes = db
@@ -97,8 +97,8 @@ function testTransaccion(tenantId) {
 
   let threw = false;
   try {
-    withForcedFailure('INSERT INTO taller_venta_items', () => {
-      tallerService.registrarVenta(tenantId, {
+    await withForcedFailure('INSERT INTO taller_venta_items', () => {
+      return tallerService.registrarVenta(tenantId, {
         tipo: 'contado',
         items: [{ descripcion: 'Repuesto de prueba QA', cantidad: 1, precio_unitario: 100 }],
       });
@@ -117,7 +117,7 @@ function testTransaccion(tenantId) {
   check('No quedó ningún ítem huérfano (el conteo de ítems no cambió)', itemsDespues === itemsAntes, `antes=${itemsAntes} después=${itemsDespues}`);
 
   // Control positivo: sin fallo forzado, la venta sí se crea completa.
-  const venta = tallerService.registrarVenta(tenantId, {
+  const venta = await tallerService.registrarVenta(tenantId, {
     tipo: 'contado',
     items: [{ descripcion: 'Repuesto de control', cantidad: 2, precio_unitario: 50 }],
   });
@@ -144,7 +144,7 @@ async function main() {
   try {
     await testAcentos(tenantA);
     await testAcentosAislamientoTenant(tenantA, tenantB);
-    testTransaccion(tenantA);
+    await testTransaccion(tenantA);
   } finally {
     limpiar([tenantA, tenantB]);
   }

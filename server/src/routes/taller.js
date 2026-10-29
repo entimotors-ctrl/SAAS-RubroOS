@@ -24,8 +24,8 @@ router.use('/inventario', require('./tallerInventory'));
 router.use('/ordenes', require('./tallerOrders'));
 
 // ---- POS / Ventas (contado y crédito) ----
-router.get('/ventas', (req, res) => {
-  const ventas = db
+router.get('/ventas', async (req, res) => {
+  const ventas = await db
     .prepare(
       `SELECT v.*, c.nombre AS cliente_nombre FROM taller_ventas v
        LEFT JOIN taller_clientes c ON c.id = v.cliente_id AND c.tenant_id = v.tenant_id
@@ -35,45 +35,46 @@ router.get('/ventas', (req, res) => {
   const itemsStmt = db.prepare('SELECT * FROM taller_venta_items WHERE venta_id = ?');
   const abonosStmt = db.prepare('SELECT * FROM taller_abonos WHERE venta_id = ? ORDER BY fecha DESC');
   for (const v of ventas) {
-    v.items = itemsStmt.all(v.id);
-    v.abonos = abonosStmt.all(v.id);
+    v.items = await itemsStmt.all(v.id);
+    v.abonos = await abonosStmt.all(v.id);
   }
   res.json(ventas);
 });
 
-router.post('/ventas', (req, res, next) => {
+router.post('/ventas', async (req, res, next) => {
   try {
-    const venta = tallerService.registrarVenta(req.user.tenant_id, req.body || {}, req.user.sub);
+    const venta = await tallerService.registrarVenta(req.user.tenant_id, req.body || {}, req.user.sub);
     res.status(201).json(venta);
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/ventas/:id/abonos', (req, res, next) => {
+router.post('/ventas/:id/abonos', async (req, res, next) => {
   try {
-    const venta = tallerService.registrarAbono(req.user.tenant_id, req.params.id, req.body?.monto);
+    const venta = await tallerService.registrarAbono(req.user.tenant_id, req.params.id, req.body?.monto);
     res.json(venta);
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/finanzas/resumen', (req, res) => {
+// NOTA Fase 2 (Postgres): business_day()/business_today() — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
+router.get('/finanzas/resumen', async (req, res) => {
   const tenantId = req.user.tenant_id;
-  const hoy = db
+  const hoy = (await db
     .prepare("SELECT COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) = business_today(tenant_id)")
-    .get(tenantId).total;
-  const semana = db
+    .get(tenantId)).total;
+  const semana = await db
     .prepare("SELECT business_day(created_at,tenant_id) AS dia, COALESCE(SUM(total),0) AS total FROM taller_ventas WHERE tenant_id = ? AND business_day(created_at,tenant_id) >= date(business_today(tenant_id),'-6 day') GROUP BY dia ORDER BY dia")
     .all(tenantId);
-  const creditoPendiente = db
+  const creditoPendiente = (await db
     .prepare("SELECT COALESCE(SUM(saldo),0) AS total FROM taller_ventas WHERE tenant_id = ? AND estado = 'credito_abierto'")
-    .get(tenantId).total;
-  const citasHoy = db
+    .get(tenantId)).total;
+  const citasHoy = (await db
     .prepare("SELECT COUNT(*) AS n FROM taller_citas WHERE tenant_id = ? AND fecha = business_today(tenant_id)")
-    .get(tenantId).n;
-  const vehiculosEnTaller = db.prepare("SELECT COUNT(DISTINCT vehiculo_id) AS n FROM taller_ordenes WHERE tenant_id = ? AND estado NOT IN ('entregada', 'cancelada')").get(tenantId).n;
+    .get(tenantId)).n;
+  const vehiculosEnTaller = (await db.prepare("SELECT COUNT(DISTINCT vehiculo_id) AS n FROM taller_ordenes WHERE tenant_id = ? AND estado NOT IN ('entregada', 'cancelada')").get(tenantId)).n;
   res.json({ ventasHoy: hoy, ventasUltimaSemana: semana, creditoPendiente, citasHoy, vehiculosEnTaller });
 });
 

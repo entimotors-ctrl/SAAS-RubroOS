@@ -3,16 +3,16 @@ const db = require('../db');
 const { ServiceError } = require('./errors');
 
 const { number, money } = require('./validation');
-function getSale(tenantId, id) {
-  const sale = db.prepare('SELECT * FROM taller_ventas WHERE id = ? AND tenant_id = ?').get(id, tenantId);
+async function getSale(tenantId, id) {
+  const sale = await db.prepare('SELECT * FROM taller_ventas WHERE id = ? AND tenant_id = ?').get(id, tenantId);
   if (!sale) throw new ServiceError('Venta no encontrada', 404);
   delete sale.request_hash;
   delete sale.request_key;
-  sale.items = db.prepare('SELECT * FROM taller_venta_items WHERE venta_id = ?').all(id);
+  sale.items = await db.prepare('SELECT * FROM taller_venta_items WHERE venta_id = ?').all(id);
   return sale;
 }
 
-function registrarVenta(tenantId, input = {}, userId = null) {
+async function registrarVenta(tenantId, input = {}, userId = null) {
   const { cliente_id, tipo = 'contado', items, pagado_inicial = 0, request_key } = input;
   if (!['contado', 'credito'].includes(tipo)) throw new ServiceError('Tipo de venta inválido');
   if (!Array.isArray(items) || !items.length || items.length > 200) throw new ServiceError('La venta necesita entre 1 y 200 ítems');
@@ -36,45 +36,45 @@ function registrarVenta(tenantId, input = {}, userId = null) {
   if (clientId !== null && !Number.isInteger(clientId)) throw new ServiceError('Cliente inválido');
   const hash = crypto.createHash('sha256').update(JSON.stringify({ clientId, tipo, normalized, paidCents })).digest('hex');
 
-  return db.transaction(() => {
+  return db.transaction(async () => {
     if (request_key) {
-      const existing = db.prepare('SELECT id, request_hash FROM taller_ventas WHERE tenant_id = ? AND request_key = ?').get(tenantId, request_key);
+      const existing = await db.prepare('SELECT id, request_hash FROM taller_ventas WHERE tenant_id = ? AND request_key = ?').get(tenantId, request_key);
       if (existing) {
         if (existing.request_hash !== hash) throw new ServiceError('Esta solicitud ya se utilizó para otra venta', 409);
         return getSale(tenantId, existing.id);
       }
     }
-    if (clientId && !db.prepare('SELECT id FROM taller_clientes WHERE id = ? AND tenant_id = ?').get(clientId, tenantId)) throw new ServiceError('El cliente no existe o no pertenece a tu negocio');
+    if (clientId && !(await db.prepare('SELECT id FROM taller_clientes WHERE id = ? AND tenant_id = ?').get(clientId, tenantId))) throw new ServiceError('El cliente no existe o no pertenece a tu negocio');
     const saldo = (totalCents - paidCents) / 100;
-    const id = db.prepare('INSERT INTO taller_ventas (tenant_id, cliente_id, tipo, total, pagado, saldo, estado, request_key, request_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(tenantId, clientId, tipo, totalCents / 100, paidCents / 100, saldo, saldo === 0 ? 'pagada' : 'credito_abierto', request_key ?? null, hash).lastInsertRowid;
+    const id = (await db.prepare('INSERT INTO taller_ventas (tenant_id, cliente_id, tipo, total, pagado, saldo, estado, request_key, request_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(tenantId, clientId, tipo, totalCents / 100, paidCents / 100, saldo, saldo === 0 ? 'pagada' : 'credito_abierto', request_key ?? null, hash)).lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO taller_venta_items (venta_id, descripcion, cantidad, precio_unitario, subtotal, producto_id) VALUES (?, ?, ?, ?, ?, ?)');
     for (const it of normalized) {
       if (it.producto_id !== null) {
-        const product = db.prepare('SELECT * FROM taller_inventario WHERE id = ? AND tenant_id = ?').get(it.producto_id, tenantId);
+        const product = await db.prepare('SELECT * FROM taller_inventario WHERE id = ? AND tenant_id = ?').get(it.producto_id, tenantId);
         if (!product) throw new ServiceError('El producto no existe o no pertenece a tu negocio');
         if (product.stock < it.cantidad) throw new ServiceError(`Stock insuficiente para ${product.nombre}`, 409);
         const stock = Math.round((product.stock - it.cantidad) * 1000) / 1000;
-        db.prepare('UPDATE taller_inventario SET stock = ? WHERE id = ? AND tenant_id = ?').run(stock, product.id, tenantId);
-        db.prepare('INSERT INTO taller_stock_movimientos (tenant_id, producto_id, venta_id, cantidad, stock_resultante, motivo, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        await db.prepare('UPDATE taller_inventario SET stock = ? WHERE id = ? AND tenant_id = ?').run(stock, product.id, tenantId);
+        await db.prepare('INSERT INTO taller_stock_movimientos (tenant_id, producto_id, venta_id, cantidad, stock_resultante, motivo, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(tenantId, product.id, id, -it.cantidad, stock, 'venta', userId);
       }
-      insertItem.run(id, it.descripcion, it.cantidad, it.precio_unitario, it.subtotal, it.producto_id);
+      await insertItem.run(id, it.descripcion, it.cantidad, it.precio_unitario, it.subtotal, it.producto_id);
     }
     return getSale(tenantId, id);
   }).immediate();
 }
 
-function registrarAbono(tenantId, ventaId, monto) {
+async function registrarAbono(tenantId, ventaId, monto) {
   const cents = money(monto, 'Monto');
   if (cents <= 0) throw new ServiceError('El abono debe ser mayor que cero');
-  return db.transaction(() => {
-    const sale = getSale(tenantId, ventaId);
+  return db.transaction(async () => {
+    const sale = await getSale(tenantId, ventaId);
     if (cents > Math.round(sale.saldo * 100)) throw new ServiceError('El abono no puede superar el saldo');
-    db.prepare('INSERT INTO taller_abonos (tenant_id, venta_id, monto) VALUES (?, ?, ?)').run(tenantId, ventaId, cents / 100);
+    await db.prepare('INSERT INTO taller_abonos (tenant_id, venta_id, monto) VALUES (?, ?, ?)').run(tenantId, ventaId, cents / 100);
     const paid = Math.round(sale.pagado * 100) + cents;
     const balance = Math.round(sale.total * 100) - paid;
-    db.prepare('UPDATE taller_ventas SET pagado = ?, saldo = ?, estado = ? WHERE id = ? AND tenant_id = ?').run(paid / 100, balance / 100, balance === 0 ? 'pagada' : 'credito_abierto', ventaId, tenantId);
+    await db.prepare('UPDATE taller_ventas SET pagado = ?, saldo = ?, estado = ? WHERE id = ? AND tenant_id = ?').run(paid / 100, balance / 100, balance === 0 ? 'pagada' : 'credito_abierto', ventaId, tenantId);
     return getSale(tenantId, ventaId);
   }).immediate();
 }

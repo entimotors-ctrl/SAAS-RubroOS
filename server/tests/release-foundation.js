@@ -107,7 +107,7 @@ try {
   await db.prepare("UPDATE users SET role='tenant_admin' WHERE id=?").run(uid);
   let order;
   await test('Create repair order with matching client and vehicle',async ()=>{order=await orders.create(tid,uid,{cliente_id:client,vehiculo_id:vehicle,motivo:'Ruido',kilometraje:500});assert.equal(order.estado,'recibida');});
-  await test('Foreign tenant cannot read repair order',()=>assert.throws(()=>orders.get(other,order.id)));
+  await test('Foreign tenant cannot read repair order',()=>assert.rejects(()=>orders.get(other,order.id)));
   await test('Delivery cannot skip approval and workshop states',()=>failsAtomically(()=>orders.deliver(tid,uid,order.id,{version:order.version})));
   await test('Quote records diagnosis and version',async ()=>{order=await orders.quote(tid,uid,order.id,{version:order.version,diagnostico:'Cambiar filtro',items:[item]});assert.equal(order.estado,'presupuestada');});
   await test('Stale update cannot overwrite quote',()=>failsAtomically(()=>orders.quote(tid,uid,order.id,{version:1,diagnostico:'Viejo',items:[item]})));
