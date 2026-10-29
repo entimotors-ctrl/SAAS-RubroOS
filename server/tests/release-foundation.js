@@ -128,17 +128,17 @@ try {
   await test('Appointments respect weekly hours and one-off availability blocks',async ()=>{
     const base={barbero_id:barber,servicio_id:barberService,fecha:'2027-01-18',hora:'09:00'};
     assert.equal((await appointments.save(barberTenant,base)).estado,'pendiente');
-    assert.throws(()=>appointments.save(barberTenant,{...base,hora:'08:45'}),/horario/);
+    await assert.rejects(()=>appointments.save(barberTenant,{...base,hora:'08:45'}),/horario/);
     const block=await availability.createBlock(barberTenant,{barbero_id:barber,fecha:'2027-01-18',hora_inicio:'10:00',hora_fin:'11:00',motivo:'Capacitación'});
-    assert.throws(()=>appointments.save(barberTenant,{...base,hora:'10:00'}),/Capacitación/);
+    await assert.rejects(()=>appointments.save(barberTenant,{...base,hora:'10:00'}),/Capacitación/);
     await availability.removeBlock(barberTenant,block.id);
     assert.equal((await appointments.save(barberTenant,{...base,hora:'10:00'})).estado,'pendiente');
   });
   await test('Availability rejects incomplete or invalid hours',async ()=>{
-    assert.throws(()=>availability.createBlock(barberTenant,{barbero_id:barber,fecha:'2027-01-19',hora_inicio:'10:00'}),/ambas horas/);
+    await assert.rejects(()=>availability.createBlock(barberTenant,{barbero_id:barber,fecha:'2027-01-19',hora_inicio:'10:00'}),/ambas horas/);
     const schedule=(await availability.list(barberTenant)).horarios.filter(row=>row.barbero_id===barber);
     schedule[1]={...schedule[1],hora_inicio:'18:00',hora_fin:'09:00',activo:1};
-    assert.throws(()=>availability.setSchedule(barberTenant,barber,schedule),/cierre/);
+    await assert.rejects(()=>availability.setSchedule(barberTenant,barber,schedule),/cierre/);
   });
   await test('Migration is repeatable',async ()=>{require('../src/db/migrations').migrate(db,':memory:');assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).n,7);});
   console.log(`\n${passed}/${passed} checks OK`);
