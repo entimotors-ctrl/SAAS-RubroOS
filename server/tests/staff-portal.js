@@ -42,7 +42,7 @@ async function activate(i,key){const r=await req('', '/staff-public/activate','P
  const tid=users.barberia.tenant_id,barbers=db.prepare('SELECT * FROM barberia_barberos WHERE tenant_id=? AND activo=1').all(tid);assert(barbers.length>=2);
  check((await req('barberia',`/staff/members/${a.user.id}`,'PUT',{barbero_id:barbers[0].id})).status,200);
  check((await req('barberia',`/staff/members/${b.user.id}`,'PUT',{barbero_id:barbers[1].id})).status,200);
- const day=require('../src/services/settings').day(tid),service=db.prepare('SELECT * FROM barberia_servicios WHERE tenant_id=?').get(tid),client=db.prepare('SELECT * FROM barberia_clientes WHERE tenant_id=?').get(tid);
+ const day=await require('../src/services/settings').day(tid),service=db.prepare('SELECT * FROM barberia_servicios WHERE tenant_id=?').get(tid),client=db.prepare('SELECT * FROM barberia_clientes WHERE tenant_id=?').get(tid);
  db.prepare('DELETE FROM barberia_citas WHERE tenant_id=?').run(tid);
  const add=(barber,hour,date=day)=>Number(db.prepare("INSERT INTO barberia_citas(tenant_id,barbero_id,servicio_id,cliente_id,fecha,hora,estado,duracion_min) VALUES(?,?,?,?,?,?,'confirmada',30)").run(tid,barber,service.id,client.id,date,hour).lastInsertRowid);
  const first=add(barbers[0].id,'09:00'),second=add(barbers[0].id,'10:00'),other=add(barbers[1].id,'09:00'),future=add(barbers[0].id,'09:00','2099-01-01');
