@@ -14,11 +14,11 @@ function normalizePhoneNumber(raw) {
  * que el remitente pueda escribir ("soy del tenant 5" no tiene ningún
  * efecto, porque este resolver ni siquiera mira el texto del mensaje).
  */
-function resolve({ phoneNumberId, from }) {
+async function resolve({ phoneNumberId, from }) {
   const phoneNumber = normalizePhoneNumber(from);
   if (!phoneNumberId || !phoneNumber) return null;
 
-  const row = db
+  const row = await db
     .prepare(
       `SELECT wi.tenant_id AS tenantId, wi.user_id AS userId, u.role AS role, u.business_type AS businessType
        FROM whatsapp_identities wi

@@ -23,20 +23,20 @@ function sanitizeForAudit(value) {
 
 // ---- Conversaciones ----
 
-function createConversation({ tenantId, userId, channel = 'web', externalUserId = null }) {
+async function createConversation({ tenantId, userId, channel = 'web', externalUserId = null }) {
   if (!tenantId) throw new Error('createConversation requiere tenantId');
-  const info = db
+  const info = await db
     .prepare('INSERT INTO ai_conversations (tenant_id, user_id, channel, external_user_id) VALUES (?, ?, ?, ?)')
     .run(tenantId, userId || null, channel, externalUserId);
   return getConversation(info.lastInsertRowid, tenantId);
 }
 
 /** SIEMPRE filtrado por tenant_id — una conversación de otro tenant nunca se devuelve, ni por error. */
-function getConversation(conversationId, tenantId) {
+async function getConversation(conversationId, tenantId) {
   return db.prepare('SELECT * FROM ai_conversations WHERE id = ? AND tenant_id = ?').get(conversationId, tenantId);
 }
 
-function listConversations(tenantId, { userId } = {}) {
+async function listConversations(tenantId, { userId } = {}) {
   if (userId) {
     return db.prepare('SELECT * FROM ai_conversations WHERE tenant_id = ? AND user_id = ? ORDER BY id DESC').all(tenantId, userId);
   }
@@ -50,7 +50,7 @@ function listConversations(tenantId, { userId } = {}) {
  * o undefined si todavía no existe una (el caller debe crearla con
  * createConversation en ese caso).
  */
-function findConversationByChannel({ tenantId, channel, externalUserId }) {
+async function findConversationByChannel({ tenantId, channel, externalUserId }) {
   return db
     .prepare('SELECT * FROM ai_conversations WHERE tenant_id = ? AND channel = ? AND external_user_id = ? ORDER BY id DESC LIMIT 1')
     .get(tenantId, channel, externalUserId);
@@ -58,33 +58,33 @@ function findConversationByChannel({ tenantId, channel, externalUserId }) {
 
 // ---- Mensajes ----
 
-function recordMessage(conversationId, tenantId, role, content) {
-  const conversation = getConversation(conversationId, tenantId);
+async function recordMessage(conversationId, tenantId, role, content) {
+  const conversation = await getConversation(conversationId, tenantId);
   if (!conversation) throw new Error('Conversación no encontrada para este tenant');
   const safeContent = typeof content === 'string' ? content : JSON.stringify(sanitizeForAudit(content));
-  const info = db
+  const info = await db
     .prepare('INSERT INTO ai_messages (conversation_id, tenant_id, role, content) VALUES (?, ?, ?, ?)')
     .run(conversationId, tenantId, role, safeContent);
-  db.prepare('UPDATE ai_conversations SET updated_at = datetime(\'now\') WHERE id = ?').run(conversationId);
+  await db.prepare('UPDATE ai_conversations SET updated_at = datetime(\'now\') WHERE id = ?').run(conversationId);
   return db.prepare('SELECT * FROM ai_messages WHERE id = ?').get(info.lastInsertRowid);
 }
 
 /** SIEMPRE filtrado por tenant_id, no solo por conversation_id. */
-function listMessages(conversationId, tenantId) {
+async function listMessages(conversationId, tenantId) {
   return db.prepare('SELECT * FROM ai_messages WHERE conversation_id = ? AND tenant_id = ? ORDER BY id ASC').all(conversationId, tenantId);
 }
 
 // ---- Acciones (propuestas / confirmadas / ejecutadas) ----
 
-function findExistingAction(conversationId, tenantId, toolName, idempotencyKey) {
+async function findExistingAction(conversationId, tenantId, toolName, idempotencyKey) {
   if (!idempotencyKey) return null;
   return db
     .prepare('SELECT * FROM ai_actions WHERE conversation_id = ? AND tenant_id = ? AND tool_name = ? AND idempotency_key = ?')
     .get(conversationId, tenantId, toolName, idempotencyKey);
 }
 
-function createAction({ conversationId, tenantId, toolName, args, idempotencyKey = null, status = 'pending_confirmation' }) {
-  const info = db
+async function createAction({ conversationId, tenantId, toolName, args, idempotencyKey = null, status = 'pending_confirmation' }) {
+  const info = await db
     .prepare(
       `INSERT INTO ai_actions (conversation_id, tenant_id, tool_name, arguments, idempotency_key, status)
        VALUES (?, ?, ?, ?, ?, ?)`
@@ -94,7 +94,7 @@ function createAction({ conversationId, tenantId, toolName, args, idempotencyKey
 }
 
 /** SIEMPRE filtrado por tenant_id — clave para que no se pueda confirmar una acción ajena. */
-function getAction(actionId, tenantId) {
+async function getAction(actionId, tenantId) {
   return db.prepare('SELECT * FROM ai_actions WHERE id = ? AND tenant_id = ?').get(actionId, tenantId);
 }
 
@@ -104,14 +104,14 @@ function getAction(actionId, tenantId) {
  * confirmationIntent.js) para decidir si un "sí"/"no" suelto resuelve una
  * sola acción sin ambigüedad, o si hay que preguntar cuál.
  */
-function listPendingActions(conversationId, tenantId) {
+async function listPendingActions(conversationId, tenantId) {
   return db
     .prepare("SELECT * FROM ai_actions WHERE conversation_id = ? AND tenant_id = ? AND status = 'pending_confirmation' ORDER BY id ASC")
     .all(conversationId, tenantId);
 }
 
-function updateActionStatus(actionId, tenantId, status, result) {
-  db.prepare("UPDATE ai_actions SET status = ?, result = ?, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?").run(
+async function updateActionStatus(actionId, tenantId, status, result) {
+  await db.prepare("UPDATE ai_actions SET status = ?, result = ?, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?").run(
     status,
     result !== undefined ? JSON.stringify(sanitizeForAudit(result)) : null,
     actionId,

@@ -24,20 +24,20 @@ function getAvailableTools(context) {
   return listTools(context.businessType).filter((t) => context.permissions?.includes(t.permission));
 }
 
-function getPromptNames(context) {
-  const tenant = db.prepare('SELECT nombre_empresa FROM tenants WHERE id = ?').get(context.tenantId);
-  const user = context.userId ? db.prepare('SELECT nombre FROM users WHERE id = ?').get(context.userId) : null;
+async function getPromptNames(context) {
+  const tenant = await db.prepare('SELECT nombre_empresa FROM tenants WHERE id = ?').get(context.tenantId);
+  const user = context.userId ? await db.prepare('SELECT nombre FROM users WHERE id = ?').get(context.userId) : null;
   return { tenantName: tenant?.nombre_empresa, userName: user?.nombre };
 }
 
-function systemPromptFor(context) {
-  const { tenantName, userName } = getPromptNames(context);
+async function systemPromptFor(context) {
+  const { tenantName, userName } = await getPromptNames(context);
   return buildFullPrompt({ businessType: context.businessType, tenantName, userName, role: context.role });
 }
 
-function resolveConversation(context, conversationId) {
+async function resolveConversation(context, conversationId) {
   if (conversationId) {
-    const existing = history.getConversation(conversationId, context.tenantId);
+    const existing = await history.getConversation(conversationId, context.tenantId);
     if (existing) return existing;
     // El id no existe o pertenece a otro tenant: no se filtra información,
     // simplemente se abre una conversación nueva.
@@ -45,8 +45,8 @@ function resolveConversation(context, conversationId) {
   return history.createConversation({ tenantId: context.tenantId, userId: context.userId, channel: context.channel });
 }
 
-function buildWorkingMessages(context, conversation) {
-  const prior = history.listMessages(conversation.id, context.tenantId).slice(-MAX_HISTORY_MESSAGES);
+async function buildWorkingMessages(context, conversation) {
+  const prior = (await history.listMessages(conversation.id, context.tenantId)).slice(-MAX_HISTORY_MESSAGES);
   return prior.map((m) => ({ role: m.role, content: m.content }));
 }
 
@@ -66,12 +66,12 @@ function toProviderToolList(tools) {
 
 async function handleChatMessage({ context, conversationId, userMessage, provider, idempotencyKey }) {
   const activeProvider = provider || createProvider();
-  const conversation = resolveConversation(context, conversationId);
-  history.recordMessage(conversation.id, context.tenantId, 'user', userMessage);
+  const conversation = await resolveConversation(context, conversationId);
+  await history.recordMessage(conversation.id, context.tenantId, 'user', userMessage);
 
   const tools = getAvailableTools(context);
-  const systemPrompt = systemPromptFor(context);
-  const workingMessages = buildWorkingMessages(context, conversation); // ya incluye el mensaje recién grabado
+  const systemPrompt = await systemPromptFor(context);
+  const workingMessages = await buildWorkingMessages(context, conversation); // ya incluye el mensaje recién grabado
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
     let response;
@@ -80,13 +80,13 @@ async function handleChatMessage({ context, conversationId, userMessage, provide
     } catch (err) {
       console.error('[ai] error del proveedor:', err?.message || err);
       const fallback = 'No fue posible conectar con el asistente en este momento. Intenta de nuevo en unos minutos.';
-      history.recordMessage(conversation.id, context.tenantId, 'assistant', fallback);
+      await history.recordMessage(conversation.id, context.tenantId, 'assistant', fallback);
       return { type: 'message', conversationId: conversation.id, message: fallback };
     }
 
     if (response.type === 'message') {
       const text = response.content || 'No tengo una respuesta para eso.';
-      history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
+      await history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
       return { type: 'message', conversationId: conversation.id, message: text };
     }
 
@@ -104,7 +104,7 @@ async function handleChatMessage({ context, conversationId, userMessage, provide
     });
 
     if (toolResult.needsConfirmation) {
-      history.recordMessage(conversation.id, context.tenantId, 'assistant', toolResult.message);
+      await history.recordMessage(conversation.id, context.tenantId, 'assistant', toolResult.message);
       return { type: 'confirmation_required', conversationId: conversation.id, actionId: toolResult.actionId, message: toolResult.message };
     }
 
@@ -113,27 +113,27 @@ async function handleChatMessage({ context, conversationId, userMessage, provide
   }
 
   const fallback = 'No pude completar tu solicitud — intenta reformularla o hazla más específica.';
-  history.recordMessage(conversation.id, context.tenantId, 'assistant', fallback);
+  await history.recordMessage(conversation.id, context.tenantId, 'assistant', fallback);
   return { type: 'message', conversationId: conversation.id, message: fallback };
 }
 
 async function confirmAndReply({ context, actionId, provider }) {
   const activeProvider = provider || createProvider();
-  const action = history.getAction(actionId, context.tenantId);
+  const action = await history.getAction(actionId, context.tenantId);
   if (!action) return { type: 'error', code: 'ACTION_NOT_FOUND', message: 'No encontré esa acción para confirmar.' };
 
-  const conversation = history.getConversation(action.conversation_id, context.tenantId);
+  const conversation = await history.getConversation(action.conversation_id, context.tenantId);
   const result = await confirmToolCall({ actionId, context });
 
   if (!result.success) {
     const text = `No pude completar la acción: ${result.message}`;
-    if (conversation) history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
+    if (conversation) await history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
     return { type: 'message', conversationId: conversation?.id, message: text };
   }
 
   const tools = getAvailableTools(context);
-  const systemPrompt = systemPromptFor(context);
-  const workingMessages = conversation ? buildWorkingMessages(context, conversation) : [];
+  const systemPrompt = await systemPromptFor(context);
+  const workingMessages = conversation ? await buildWorkingMessages(context, conversation) : [];
   workingMessages.push({ role: 'assistant', content: '', toolCalls: [{ id: 'confirmed', name: action.tool_name, args: JSON.parse(action.arguments || '{}') }] });
   workingMessages.push({ role: 'tool', name: action.tool_name, toolCallId: 'confirmed', content: JSON.stringify(toolResultForModel(result)) });
 
@@ -146,20 +146,20 @@ async function confirmAndReply({ context, actionId, provider }) {
     text = 'La acción se completó correctamente, aunque no pude generar un resumen en este momento.';
   }
 
-  if (conversation) history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
+  if (conversation) await history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
   return { type: 'message', conversationId: conversation?.id, message: text };
 }
 
 async function cancelAndReply({ context, actionId }) {
-  const action = history.getAction(actionId, context.tenantId);
+  const action = await history.getAction(actionId, context.tenantId);
   if (!action) return { type: 'error', code: 'ACTION_NOT_FOUND', message: 'No encontré esa acción para cancelar.' };
-  const conversation = history.getConversation(action.conversation_id, context.tenantId);
+  const conversation = await history.getConversation(action.conversation_id, context.tenantId);
   const result = await rejectToolCall({ actionId, context });
   if (!result.success) {
     return { type: 'message', conversationId: conversation?.id, message: `No pude cancelar: ${result.message}` };
   }
   const text = 'Entendido, no realicé esa acción.';
-  if (conversation) history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
+  if (conversation) await history.recordMessage(conversation.id, context.tenantId, 'assistant', text);
   return { type: 'message', conversationId: conversation?.id, message: text };
 }
 

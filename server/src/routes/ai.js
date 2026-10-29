@@ -77,22 +77,22 @@ router.post('/cancel', aiLimiter, async (req, res, next) => {
 });
 
 // Para "nueva conversación / continuar una anterior" en el frontend.
-router.get('/conversations', (req, res, next) => {
+router.get('/conversations', async (req, res, next) => {
   try {
     const context = contextFromRequest(req);
-    const rows = history.listConversations(context.tenantId, { userId: context.userId }).slice(0, 20);
+    const rows = (await history.listConversations(context.tenantId, { userId: context.userId })).slice(0, 20);
     res.json(rows);
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/conversations/:id/messages', (req, res, next) => {
+router.get('/conversations/:id/messages', async (req, res, next) => {
   try {
     const context = contextFromRequest(req);
-    const conversation = history.getConversation(req.params.id, context.tenantId);
+    const conversation = await history.getConversation(req.params.id, context.tenantId);
     if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
-    const messages = history.listMessages(conversation.id, context.tenantId).map((m) => ({ id: m.id, role: m.role, content: m.content, created_at: m.created_at }));
+    const messages = (await history.listMessages(conversation.id, context.tenantId)).map((m) => ({ id: m.id, role: m.role, content: m.content, created_at: m.created_at }));
     res.json(messages);
   } catch (err) {
     next(err);

@@ -47,17 +47,17 @@ router.get('/webhook', (req, res) => {
 });
 
 /** INSERT que falla por message_id duplicado = ya se vio este wamid, no procesar de nuevo. */
-function claimMessage(messageId) {
+async function claimMessage(messageId) {
   try {
-    db.prepare('INSERT INTO whatsapp_inbound_events (message_id) VALUES (?)').run(messageId);
+    await db.prepare('INSERT INTO whatsapp_inbound_events (message_id) VALUES (?)').run(messageId);
     return true;
   } catch {
     return false;
   }
 }
 
-function markEvent(messageId, status, tenantId) {
-  db.prepare("UPDATE whatsapp_inbound_events SET status = ?, tenant_id = COALESCE(?, tenant_id), updated_at = datetime('now') WHERE message_id = ?").run(
+async function markEvent(messageId, status, tenantId) {
+  await db.prepare("UPDATE whatsapp_inbound_events SET status = ?, tenant_id = COALESCE(?, tenant_id), updated_at = datetime('now') WHERE message_id = ?").run(
     status,
     tenantId || null,
     messageId
@@ -90,9 +90,9 @@ async function processTextMessage(evt, identity) {
     channel: 'whatsapp',
   });
 
-  let conversation = history.findConversationByChannel({ tenantId: context.tenantId, channel: 'whatsapp', externalUserId: evt.from });
+  let conversation = await history.findConversationByChannel({ tenantId: context.tenantId, channel: 'whatsapp', externalUserId: evt.from });
   if (!conversation) {
-    conversation = history.createConversation({ tenantId: context.tenantId, userId: context.userId, channel: 'whatsapp', externalUserId: evt.from });
+    conversation = await history.createConversation({ tenantId: context.tenantId, userId: context.userId, channel: 'whatsapp', externalUserId: evt.from });
   }
 
   const handled = await confirmationIntent.tryHandle({ context, conversation, text: evt.text });
@@ -109,31 +109,31 @@ async function processTextMessage(evt, identity) {
 }
 
 async function processEvent(evt) {
-  const identity = identityResolver.resolve({ phoneNumberId: evt.phoneNumberId, from: evt.from });
+  const identity = await identityResolver.resolve({ phoneNumberId: evt.phoneNumberId, from: evt.from });
 
   if (!identity) {
     await replyText(evt.from, identityResolver.UNKNOWN_NUMBER_MESSAGE);
-    markEvent(evt.messageId, 'done');
+    await markEvent(evt.messageId, 'done');
     return;
   }
 
   if (evt.type !== 'text') {
     await replyText(evt.from, 'Por ahora solo puedo leer mensajes de texto. Escríbeme lo que necesitas y con gusto te ayudo.');
-    markEvent(evt.messageId, 'done', identity.tenantId);
+    await markEvent(evt.messageId, 'done', identity.tenantId);
     return;
   }
 
   try {
     await processTextMessage(evt, identity);
-    markEvent(evt.messageId, 'done', identity.tenantId);
+    await markEvent(evt.messageId, 'done', identity.tenantId);
   } catch (err) {
     console.error('[whatsapp] error procesando mensaje:', err?.message || err);
-    markEvent(evt.messageId, 'failed', identity.tenantId);
+    await markEvent(evt.messageId, 'failed', identity.tenantId);
     await replyText(evt.from, 'No pude procesar tu solicitud en este momento.');
   }
 }
 
-router.post('/webhook', (req, res) => {
+router.post('/webhook', async (req, res) => {
   const signatureHeader = req.headers['x-hub-signature-256'];
   const valid = verifySignature(req.rawBody, signatureHeader, process.env.WHATSAPP_APP_SECRET);
   if (!valid) {
@@ -142,7 +142,11 @@ router.post('/webhook', (req, res) => {
   }
 
   const events = parseIncomingEvents(req.body);
-  const claimed = events.filter((evt) => claimMessage(evt.messageId));
+  const claimed = [];
+  for (const evt of events) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await claimMessage(evt.messageId)) claimed.push(evt);
+  }
 
   // Meta necesita una respuesta rápida — no se deja la conexión abierta
   // mientras el LLM/tools/DB procesan. El resto sigue en el mismo proceso

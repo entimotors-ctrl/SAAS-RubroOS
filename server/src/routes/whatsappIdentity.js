@@ -20,9 +20,9 @@ function requireTenantAdmin(req, res, next) {
   next();
 }
 
-router.get('/status', (req, res, next) => {
+router.get('/status', async (req, res, next) => {
   try {
-    res.json(identityService.getStatus(req.user.tenant_id));
+    res.json(await identityService.getStatus(req.user.tenant_id));
   } catch (err) {
     next(err);
   }
@@ -39,20 +39,20 @@ router.post('/link', requireTenantAdmin, async (req, res, next) => {
   }
 });
 
-router.post('/verify', requireTenantAdmin, verifyLimiter, (req, res, next) => {
+router.post('/verify', requireTenantAdmin, verifyLimiter, async (req, res, next) => {
   try {
     const { code } = req.body || {};
     if (!code) return res.status(400).json({ error: 'Falta code' });
-    const result = identityService.verifyLink({ tenantId: req.user.tenant_id, userId: req.user.sub, code });
+    const result = await identityService.verifyLink({ tenantId: req.user.tenant_id, userId: req.user.sub, code });
     res.json(result);
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/unlink', requireTenantAdmin, (req, res, next) => {
+router.post('/unlink', requireTenantAdmin, async (req, res, next) => {
   try {
-    const result = identityService.unlink({ tenantId: req.user.tenant_id, userId: req.user.sub });
+    const result = await identityService.unlink({ tenantId: req.user.tenant_id, userId: req.user.sub });
     res.json(result);
   } catch (err) {
     next(err);

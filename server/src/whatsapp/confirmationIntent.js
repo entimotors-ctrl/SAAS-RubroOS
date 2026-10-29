@@ -32,9 +32,9 @@ function listadoPendientes(pending) {
  * ai_actions); el modelo jamás puede afirmarlo por su cuenta, porque estos
  * casos nunca llegan a chatService.handleChatMessage().
  */
-function noResuelto(conversation, context, pending, motivo) {
+async function noResuelto(conversation, context, pending, motivo) {
   const message = `${motivo} Estas son las acciones pendientes:\n${listadoPendientes(pending)}\n\nResponde con el número de la que quieres confirmar, o escribe "cancelar" seguido del número para cancelar una en específico (ej: cancelar 2).`;
-  history.recordMessage(conversation.id, context.tenantId, 'assistant', message);
+  await history.recordMessage(conversation.id, context.tenantId, 'assistant', message);
   return { type: 'message', conversationId: conversation.id, message };
 }
 
@@ -58,15 +58,15 @@ function noResuelto(conversation, context, pending, motivo) {
  */
 async function tryHandle({ context, conversation, text }) {
   const norm = normalize(text);
-  const pending = history.listPendingActions(conversation.id, context.tenantId);
+  const pending = await history.listPendingActions(conversation.id, context.tenantId);
   if (pending.length === 0) {
     const isActionIntent = CONFIRM_TOKENS.has(norm) || CANCEL_TOKENS.has(norm)
       || BULK_CANCEL_PHRASES.has(norm) || /^(cancelar|cancela|no)\s+\d+$/.test(norm)
       || /^\d+$/.test(norm);
     if (!isActionIntent) return null;
     const message = 'No hay acciones pendientes para confirmar o cancelar en esta conversación. No se realizó ningún cambio.';
-    history.recordMessage(conversation.id, context.tenantId, 'user', text);
-    history.recordMessage(conversation.id, context.tenantId, 'assistant', message);
+    await history.recordMessage(conversation.id, context.tenantId, 'user', text);
+    await history.recordMessage(conversation.id, context.tenantId, 'assistant', message);
     return { type: 'message', conversationId: conversation.id, message };
   }
 
@@ -77,14 +77,14 @@ async function tryHandle({ context, conversation, text }) {
   if (cancelByIndex) {
     const idx = Number(cancelByIndex[2]);
     const chosen = pending[idx - 1];
-    history.recordMessage(conversation.id, context.tenantId, 'user', text);
+    await history.recordMessage(conversation.id, context.tenantId, 'user', text);
     if (!chosen) return noResuelto(conversation, context, pending, `No hay ninguna acción pendiente con el número ${idx}.`);
     return chatService.cancelAndReply({ context, actionId: chosen.id });
   }
 
   // Cancelación masiva: no está soportada — nunca se adivina ni se deja que el modelo la afirme.
   if (BULK_CANCEL_PHRASES.has(norm)) {
-    history.recordMessage(conversation.id, context.tenantId, 'user', text);
+    await history.recordMessage(conversation.id, context.tenantId, 'user', text);
     return noResuelto(conversation, context, pending, 'Por ahora no puedo cancelar varias acciones a la vez, tienes que indicar cuál.');
   }
 
@@ -93,7 +93,7 @@ async function tryHandle({ context, conversation, text }) {
   if (bareIndex && pending.length > 1) {
     const idx = Number(bareIndex[1]);
     const chosen = pending[idx - 1];
-    history.recordMessage(conversation.id, context.tenantId, 'user', text);
+    await history.recordMessage(conversation.id, context.tenantId, 'user', text);
     if (!chosen) return noResuelto(conversation, context, pending, `No hay ninguna acción pendiente con el número ${idx}.`);
     return chatService.confirmAndReply({ context, actionId: chosen.id });
   }
@@ -101,7 +101,7 @@ async function tryHandle({ context, conversation, text }) {
   const intent = CONFIRM_TOKENS.has(norm) ? 'confirm' : CANCEL_TOKENS.has(norm) ? 'cancel' : null;
   if (!intent) return null;
 
-  history.recordMessage(conversation.id, context.tenantId, 'user', text);
+  await history.recordMessage(conversation.id, context.tenantId, 'user', text);
 
   if (pending.length === 1) {
     return intent === 'confirm'
