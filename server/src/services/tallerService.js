@@ -13,7 +13,7 @@ const { registrarVenta, registrarAbono } = require('./tallerSales');
 
 // ---- Lecturas (reutilizadas por la API REST y por las tools de IA) ----
 
-function consultarInventario(tenantId) {
+async function consultarInventario(tenantId) {
   return listRows('taller_inventario', tenantId, 'nombre ASC');
 }
 
@@ -28,13 +28,13 @@ function normalizeForSearch(str) {
     .replace(/[áéíóúü]/g, (c) => ACCENT_FOLD[c]);
 }
 
-function buscarCliente(tenantId, { nombre } = {}) {
+async function buscarCliente(tenantId, { nombre } = {}) {
   if (!nombre || !nombre.trim()) throw new ServiceError('Indica un nombre para buscar');
   const needle = normalizeForSearch(nombre.trim());
   // Búsqueda amplia (ya acotada por tenant_id) + comparación normalizada en
   // memoria: evita LIKE sensible a acentos sin tocar el esquema ni registrar
   // una función SQL global.
-  const candidatos = db.prepare('SELECT * FROM taller_clientes WHERE tenant_id = ? ORDER BY nombre').all(tenantId);
+  const candidatos = await db.prepare('SELECT * FROM taller_clientes WHERE tenant_id = ? ORDER BY nombre').all(tenantId);
   return candidatos.filter((c) => normalizeForSearch(c.nombre).includes(needle)).slice(0, 20);
 }
 

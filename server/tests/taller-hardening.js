@@ -32,37 +32,37 @@ function crearTenantDePrueba(tag) {
   return info.lastInsertRowid;
 }
 
-function testAcentos(tenantId) {
+async function testAcentos(tenantId) {
   console.log('\n=== Hallazgo 2: búsqueda de clientes sin distinguir acentos ===');
   db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'Carlos Ramírez');
   db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'José Peña');
   db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantId, 'Ana Pena');
 
-  const exact = tallerService.buscarCliente(tenantId, { nombre: 'Carlos Ramírez' });
+  const exact = await tallerService.buscarCliente(tenantId, { nombre: 'Carlos Ramírez' });
   check('"Carlos Ramírez" encuentra "Carlos Ramírez" (coincidencia exacta)', exact.some((c) => c.nombre === 'Carlos Ramírez'));
 
-  const sinTilde = tallerService.buscarCliente(tenantId, { nombre: 'Carlos Ramirez' });
+  const sinTilde = await tallerService.buscarCliente(tenantId, { nombre: 'Carlos Ramirez' });
   check('"Carlos Ramirez" (sin tilde) encuentra "Carlos Ramírez"', sinTilde.some((c) => c.nombre === 'Carlos Ramírez'));
 
-  const mayus = tallerService.buscarCliente(tenantId, { nombre: 'RAMIREZ' });
+  const mayus = await tallerService.buscarCliente(tenantId, { nombre: 'RAMIREZ' });
   check('"RAMIREZ" (mayúsculas, sin tilde) encuentra "Ramírez"', mayus.some((c) => c.nombre === 'Carlos Ramírez'));
 
-  const parcial = tallerService.buscarCliente(tenantId, { nombre: 'ramir' });
+  const parcial = await tallerService.buscarCliente(tenantId, { nombre: 'ramir' });
   check('búsqueda parcial sin tilde ("ramir") funciona', parcial.some((c) => c.nombre === 'Carlos Ramírez'));
 
-  const conNhLiteral = tallerService.buscarCliente(tenantId, { nombre: 'Pena' });
+  const conNhLiteral = await tallerService.buscarCliente(tenantId, { nombre: 'Pena' });
   check(
     '"Pena" (con n) NO se confunde con "Peña" (con ñ)',
     !conNhLiteral.some((c) => c.nombre === 'José Peña') && conNhLiteral.some((c) => c.nombre === 'Ana Pena')
   );
 
-  const conEnhe = tallerService.buscarCliente(tenantId, { nombre: 'Peña' });
+  const conEnhe = await tallerService.buscarCliente(tenantId, { nombre: 'Peña' });
   check('"Peña" (con ñ) SÍ encuentra a "José Peña"', conEnhe.some((c) => c.nombre === 'José Peña'));
 }
 
-function testAcentosAislamientoTenant(tenantA, tenantB) {
+async function testAcentosAislamientoTenant(tenantA, tenantB) {
   db.prepare('INSERT INTO taller_clientes (tenant_id, nombre) VALUES (?, ?)').run(tenantB, 'Carlos Ramírez');
-  const resultado = tallerService.buscarCliente(tenantA, { nombre: 'Ramirez' });
+  const resultado = await tallerService.buscarCliente(tenantA, { nombre: 'Ramirez' });
   check(
     'Tenant A nunca encuentra un cliente de Tenant B, ni con la búsqueda normalizada',
     resultado.every((c) => c.tenant_id === tenantA)
@@ -138,12 +138,12 @@ function limpiar(tenants) {
   console.log('  listo');
 }
 
-function main() {
+async function main() {
   const tenantA = crearTenantDePrueba('a');
   const tenantB = crearTenantDePrueba('b');
   try {
-    testAcentos(tenantA);
-    testAcentosAislamientoTenant(tenantA, tenantB);
+    await testAcentos(tenantA);
+    await testAcentosAislamientoTenant(tenantA, tenantB);
     testTransaccion(tenantA);
   } finally {
     limpiar([tenantA, tenantB]);
@@ -153,4 +153,4 @@ function main() {
   if (fail > 0) process.exit(1);
 }
 
-main();
+main().catch(e=>{console.error(e);process.exitCode=1;});
