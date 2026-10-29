@@ -28,8 +28,9 @@ router.use(
   })
 );
 
-router.get('/sanidad/alertas', (req, res) => {
-  const rows = db
+// NOTA Fase 2 (Postgres): business_today() + date(x,'+30 day') — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
+router.get('/sanidad/alertas', async (req, res) => {
+  const rows = await db
     .prepare(
       `SELECT s.*, a.arete, a.nombre AS animal_nombre FROM ganaderia_sanidad s
        JOIN ganaderia_animales a ON a.id = s.animal_id AND a.tenant_id = s.tenant_id
@@ -41,8 +42,8 @@ router.get('/sanidad/alertas', (req, res) => {
 });
 
 // ---- Producción de leche ----
-router.get('/produccion', (req, res) => {
-  const rows = db
+router.get('/produccion', async (req, res) => {
+  const rows = await db
     .prepare(
       `SELECT p.*, a.arete, a.nombre AS animal_nombre FROM ganaderia_produccion_leche p
        JOIN ganaderia_animales a ON a.id = p.animal_id AND a.tenant_id = p.tenant_id
@@ -52,18 +53,18 @@ router.get('/produccion', (req, res) => {
   res.json(rows);
 });
 
-router.post('/produccion', (req, res, next) => {
+router.post('/produccion', async (req, res, next) => {
   try {
-    const registro = ganaderiaService.registrarProduccion(req.user.tenant_id, req.body || {});
+    const registro = await ganaderiaService.registrarProduccion(req.user.tenant_id, req.body || {});
     res.status(201).json(registro);
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/produccion/resumen', (req, res) => {
-  res.json(ganaderiaService.resumenProduccion(req.user.tenant_id));
+router.get('/produccion/resumen', async (req, res) => {
+  res.json(await ganaderiaService.resumenProduccion(req.user.tenant_id));
 });
 
-router.put('/produccion/:id',require('../security/access').requireAdmin,(req,res)=>res.json(require('../services/milkCorrections').correct(req.user.tenant_id,req.params.id,req.body||{},req.user.sub)));
+router.put('/produccion/:id',require('../security/access').requireAdmin,async (req,res)=>res.json(await require('../services/milkCorrections').correct(req.user.tenant_id,req.params.id,req.body||{},req.user.sub)));
 module.exports = router;

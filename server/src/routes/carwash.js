@@ -14,8 +14,8 @@ router.use(
 );
 
 // ---- Membresías (ingreso recurrente) ----
-router.get('/membresias', (req, res) => {
-  const rows = db
+router.get('/membresias', async (req, res) => {
+  const rows = await db
     .prepare(
       `SELECT m.*, c.nombre AS cliente_nombre FROM carwash_membresias m
        LEFT JOIN carwash_clientes c ON c.id = m.cliente_id AND c.tenant_id = m.tenant_id
@@ -25,27 +25,27 @@ router.get('/membresias', (req, res) => {
   res.json(rows);
 });
 
-router.post('/membresias', (req, res, next) => {
+router.post('/membresias', async (req, res, next) => {
   try {
-    const membresia = carwashService.crearMembresia(req.user.tenant_id, req.body || {});
+    const membresia = await carwashService.crearMembresia(req.user.tenant_id, req.body || {});
     res.status(201).json(membresia);
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/membresias/:id/renovar', (req, res, next) => {
+router.put('/membresias/:id/renovar', async (req, res, next) => {
   try {
-    const membresia = carwashService.renovarMembresia(req.user.tenant_id, req.params.id);
+    const membresia = await carwashService.renovarMembresia(req.user.tenant_id, req.params.id);
     res.json(membresia);
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/membresias/:id/cancelar', requireAdmin, (req, res, next) => {
+router.put('/membresias/:id/cancelar', requireAdmin, async (req, res, next) => {
   try {
-    const membresia = carwashService.cancelarMembresia(req.user.tenant_id, req.params.id);
+    const membresia = await carwashService.cancelarMembresia(req.user.tenant_id, req.params.id);
     res.json(membresia);
   } catch (err) {
     next(err);
@@ -53,8 +53,8 @@ router.put('/membresias/:id/cancelar', requireAdmin, (req, res, next) => {
 });
 
 // ---- Turnos / cola ----
-router.get('/turnos', (req, res) => {
-  const rows = db
+router.get('/turnos', async (req, res) => {
+  const rows = await db
     .prepare(
       `SELECT t.*, c.nombre AS cliente_nombre, v.placa, s.nombre AS servicio_nombre FROM carwash_turnos t
        LEFT JOIN carwash_clientes c ON c.id = t.cliente_id AND c.tenant_id = t.tenant_id
@@ -66,31 +66,32 @@ router.get('/turnos', (req, res) => {
   res.json(rows);
 });
 
-router.post('/turnos', (req, res, next) => {
+router.post('/turnos', async (req, res, next) => {
   try {
-    const turno = carwashService.crearTurno(req.user.tenant_id, req.body || {});
+    const turno = await carwashService.crearTurno(req.user.tenant_id, req.body || {});
     res.status(201).json(turno);
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/turnos/:id/estado', (req, res, next) => {
+router.put('/turnos/:id/estado', async (req, res, next) => {
   try {
-    const turno = carwashService.actualizarEstadoTurno(req.user.tenant_id, req.params.id, req.body?.estado, req.body?.metodo_pago);
+    const turno = await carwashService.actualizarEstadoTurno(req.user.tenant_id, req.params.id, req.body?.estado, req.body?.metodo_pago);
     res.json(turno);
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/resumen', (req, res) => {
+// NOTA Fase 2 (Postgres): business_day()/business_today() — ver docs/ESTADO-FASE-2-ADAPTADOR-PG.md.
+router.get('/resumen', async (req, res) => {
   const tenantId = req.user.tenant_id;
-  const hoy = db
+  const hoy = await db
     .prepare("SELECT COALESCE(SUM(precio),0) AS total, COUNT(*) AS n FROM carwash_turnos WHERE tenant_id = ? AND estado = 'entregado' AND business_day(entregado_at,tenant_id) = business_today(tenant_id)")
     .get(tenantId);
-  const enCola = db.prepare("SELECT COUNT(*) AS n FROM carwash_turnos WHERE tenant_id = ? AND estado IN ('en_cola','lavando')").get(tenantId).n;
-  const membresiasActivas = db.prepare("SELECT COUNT(*) AS n FROM carwash_membresias WHERE tenant_id = ? AND estado = 'activa' AND fecha_renovacion >= business_today(tenant_id)").get(tenantId).n;
+  const enCola = (await db.prepare("SELECT COUNT(*) AS n FROM carwash_turnos WHERE tenant_id = ? AND estado IN ('en_cola','lavando')").get(tenantId)).n;
+  const membresiasActivas = (await db.prepare("SELECT COUNT(*) AS n FROM carwash_membresias WHERE tenant_id = ? AND estado = 'activa' AND fecha_renovacion >= business_today(tenant_id)").get(tenantId)).n;
   res.json({ ingresosHoy: hoy.total, lavadosHoy: hoy.n, enCola, membresiasActivas });
 });
 
