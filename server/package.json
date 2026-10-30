@@ -5,8 +5,12 @@
   "description": "API multi-tenant de RubroOS (Taller, Barberia, Agro, Ganaderia y Lecheria, Carwash)",
   "main": "src/index.js",
   "type": "commonjs",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "node src/index.js",
+    "start": "node src/index.js",
     "seed": "node src/seed.js",
     "test": "node tests/run-isolated.js"
   },

@@ -26,7 +26,14 @@ const whatsappIdentityRoutes = require('./routes/whatsappIdentity');
 const app = express();
 
 app.use(helmet({contentSecurityPolicy:{directives:{'upgrade-insecure-requests':process.env.NODE_ENV==='production'?[]:null}}}));
+// TRUST_PROXY: 'loopback' para un proxy en la misma máquina (ej. Nginx local
+// delante del proceso Node); un entero (ej. '1') para confiar exactamente en
+// ese número de saltos de proxy — lo que piden las plataformas tipo Render
+// o Railway, que ponen su propio balanceador delante de la app. Sin esto,
+// express-rate-limit (y req.ip en general) vería la IP del proxy, no la del
+// cliente real.
 if(process.env.TRUST_PROXY==='loopback')app.set('trust proxy','loopback');
+else if(/^\d+$/.test(process.env.TRUST_PROXY||''))app.set('trust proxy',Number(process.env.TRUST_PROXY));
 const db=require('./db');
 const backupManager=require('./maintenance/backups').start(db);
 app.locals.backups=backupManager;
