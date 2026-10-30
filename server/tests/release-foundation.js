@@ -54,6 +54,10 @@ try {
     assert.throws(()=>validateEnvironment({...env,WHATSAPP_FAKE_TRANSPORT:'1'}));
     assert.throws(()=>validateEnvironment({...env,CORS_ORIGIN:'http://localhost'}));
     assert.doesNotThrow(()=>validateEnvironment(env));
+    // Con DATABASE_URL (Postgres/Supabase), DATABASE_PATH/BACKUP_DIR no aplican.
+    const envPg={NODE_ENV:'production',JWT_SECRET:'x'.repeat(48),CORS_ORIGIN:'https://app.example.com',DATABASE_URL:'postgresql://user:pass@host:5432/db'};
+    assert.doesNotThrow(()=>validateEnvironment(envPg));
+    assert.throws(()=>validateEnvironment({NODE_ENV:'production',JWT_SECRET:'x'.repeat(48),CORS_ORIGIN:'https://app.example.com'}));
   });
   await test('Sale links inventory, records stock movement and actor',async ()=>{
     const sale=await sales.registrarVenta(tid,{items:[item],request_key:'sale-test-0001'},uid);
