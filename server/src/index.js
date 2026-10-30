@@ -50,6 +50,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/owner', requireAuth, requireOwner, ownerRoutes);
 
 app.use('/api/staff-public',require('./routes/staffPublic'));
+// Agenda pública (clientes sin cuenta) por slug del negocio — ver routes/publicBooking.js.
+app.use('/api/public',require('./routes/publicBooking'));
 app.use('/api/staff',requireAuth,requireTenant,require('./routes/staff'));
 // Workers cannot reach broad business data through old APIs or the chat.
 app.use(['/api/taller','/api/barberia','/api/agro','/api/ganaderia','/api/carwash','/api/ai'],requireAuth,require('../src/security/access').requireAdmin);

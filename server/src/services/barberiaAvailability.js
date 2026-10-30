@@ -1,6 +1,7 @@
 const db = require('../db');
 const { date, text } = require('./validation');
 const { ServiceError } = require('./errors');
+const settings = require('./settings');
 
 const DAYS = new Set([0, 1, 2, 3, 4, 5, 6]);
 
@@ -106,4 +107,62 @@ async function assertAvailable(tenantId, barberId, appointmentDate, startTime, e
   if (block) throw new ServiceError(`El barbero no está disponible: ${block.motivo}`, 409);
 }
 
-module.exports = { assertAvailable, createBlock, list, removeBlock, setSchedule };
+function minutesToHHMM(min) {
+  return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
+}
+
+/**
+ * Horas de inicio disponibles para un barbero/fecha/servicio dados — a
+ * diferencia de assertAvailable() (que valida UN horario propuesto), esta
+ * enumera TODOS los que caben, para la página pública de agendar y el
+ * agendado por WhatsApp de un cliente (ver routes/publicBooking.js).
+ */
+async function freeSlots(tenantId, barberId, fecha, servicioId) {
+  date(fecha);
+  await activeBarber(tenantId, barberId);
+  const service = await db.prepare('SELECT duracion_min FROM barberia_servicios WHERE id=? AND tenant_id=?').get(servicioId, tenantId);
+  if (!service) throw new ServiceError('Servicio no encontrado', 404);
+  const duration = service.duracion_min;
+
+  // SQLite: strftime('%w', fecha) -> Postgres: EXTRACT(DOW FROM fecha::date)
+  // — misma convención (0=domingo..6=sábado) en los dos motores.
+  const dowSql = process.env.DATABASE_URL
+    ? 'SELECT EXTRACT(DOW FROM ?::date)::integer AS day'
+    : "SELECT CAST(strftime('%w', ?) AS INTEGER) AS day";
+  const weekday = (await db.prepare(dowSql).get(fecha)).day;
+  const schedule = await db.prepare(`SELECT hora_inicio,hora_fin FROM barberia_horarios
+    WHERE tenant_id=? AND barbero_id=? AND dia_semana=? AND activo=1`).get(tenantId, barberId, weekday);
+  if (!schedule) return [];
+
+  const bloqueos = await db.prepare(`SELECT hora_inicio,hora_fin FROM barberia_bloqueos
+    WHERE tenant_id=? AND barbero_id=? AND fecha=?`).all(tenantId, barberId, fecha);
+  const citas = await db.prepare(`SELECT c.hora, COALESCE(c.duracion_min,s.duracion_min,30) AS duration
+    FROM barberia_citas c LEFT JOIN barberia_servicios s ON s.id=c.servicio_id AND s.tenant_id=c.tenant_id
+    WHERE c.tenant_id=? AND c.barbero_id=? AND c.fecha=? AND c.estado NOT IN ('cancelada','no_asistio')`).all(tenantId, barberId, fecha);
+
+  // No ofrecer horarios que ya pasaron si la fecha pedida es hoy (según el
+  // día/hora de negocio del tenant, no UTC ni la hora del navegador del cliente).
+  const { timezone } = await settings.get(tenantId);
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(now);
+  const part = (k) => parts.find((p) => p.type === k).value;
+  const today = `${part('year')}-${part('month')}-${part('day')}`;
+  const nowMinutes = Number(part('hour')) * 60 + Number(part('minute'));
+
+  const start = time(schedule.hora_inicio, 'Hora de inicio');
+  const end = time(schedule.hora_fin, 'Hora de cierre');
+  const STEP_MIN = 15;
+  const slots = [];
+  for (let t = start; t + duration <= end; t += STEP_MIN) {
+    if (fecha === today && t < nowMinutes) continue;
+    const slotEnd = t + duration;
+    const blocked = bloqueos.some((b) => b.hora_inicio == null || (t < time(b.hora_fin) && slotEnd > time(b.hora_inicio)));
+    if (blocked) continue;
+    const busy = citas.some((c) => { const cs = time(c.hora); return t < cs + c.duration && slotEnd > cs; });
+    if (busy) continue;
+    slots.push(minutesToHHMM(t));
+  }
+  return slots;
+}
+
+module.exports = { assertAvailable, createBlock, list, removeBlock, setSchedule, freeSlots };

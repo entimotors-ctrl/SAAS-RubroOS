@@ -3,6 +3,7 @@ import { AuthProvider } from './lib/auth-context';
 import { useAuth } from './lib/use-auth';
 import Landing from './pages/marketing/Landing';
 import ElegirSistema from './pages/marketing/ElegirSistema';
+import AgendarCita from './pages/marketing/AgendarCita';
 import StaffInvitation from './pages/staff/StaffInvitation';
 import WorkerPortal from './pages/staff/WorkerPortal';
 import BarberBoard from './pages/staff/BarberBoard';
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/elegir-sistema" element={<ElegirSistema />} />
         <Route path="/invitacion" element={<StaffInvitation/>}/>
+        <Route path="/agendar/:slug" element={<AgendarCita/>}/>
         <Route path="/colaborador" element={<RequireTenant><WorkerPortal/></RequireTenant>}/>
         <Route path="/agenda-trabajo" element={<RequireTenant><BarberBoard/></RequireTenant>}/>
         <Route path="/restablecer" element={<ResetPassword />} />

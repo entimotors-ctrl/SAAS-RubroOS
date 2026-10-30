@@ -102,7 +102,7 @@ async function registro(business_type, tag) {
     body: { business_type, empresa_nombre: `QA WhatsApp ${tag} ${Date.now()}`, nombre: `QA ${tag}`, email, password: 'QaWhatsapp2026!' },
   });
   if (r.status !== 201) throw new Error(`No se pudo registrar tenant (${tag}): ${JSON.stringify(r.body)}`);
-  return { token: r.body.token, tenantId: r.body.tenant.id, userId: r.body.user.id, email };
+  return { token: r.body.token, tenantId: r.body.tenant.id, userId: r.body.user.id, slug: r.body.tenant.slug, email };
 }
 
 async function linkIdentity(tenantId, userId, phoneNumber, status = 'active') {
@@ -222,6 +222,26 @@ async function runChecks() {
   );
   const conversacionesDesconocido = (await db.prepare('SELECT COUNT(*) n FROM ai_conversations WHERE external_user_id = ?').get(numeroDesconocido)).n;
   check('No se creó ninguna conversación para el número desconocido', conversacionesDesconocido === 0);
+
+  console.log('\n=== 5b) Cliente sin cuenta en el número de una barbería: recibe el link de agendar ===');
+  const barberiaWa = await registro('barberia', 'barberia-wa');
+  tenants.push(barberiaWa);
+  // phone_number tiene que ser uno nuevo (es único globalmente), pero
+  // phone_number_id es el mismo PHONE_NUMBER_ID que el resto de esta prueba
+  // (ver linkIdentity) — identityResolver.resolveBusinessByPhoneNumberId
+  // ordena por id DESC, así que esta (la última vinculada) es la que se usa
+  // para el saludo del cliente sin cuenta.
+  const numeroStaffBarberia = `504555${RUN}`.slice(0, 12);
+  await linkIdentity(barberiaWa.tenantId, barberiaWa.userId, numeroStaffBarberia);
+  const numeroClienteBarberia = `504888${RUN}`.slice(0, 12);
+  await clearOutbox();
+  await sendText(numeroClienteBarberia, 'hola');
+  const respuestaClienteBarberia = await lastReplyTo(numeroClienteBarberia);
+  check(
+    'Recibe el link de la agenda pública de esa barbería, no el mensaje genérico de número no encontrado',
+    respuestaClienteBarberia?.includes(`/agendar/${barberiaWa.slug}`),
+    respuestaClienteBarberia
+  );
 
   console.log('\n=== 6) Seguridad ===');
   await clearOutbox();

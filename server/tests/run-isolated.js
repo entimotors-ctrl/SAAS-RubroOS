@@ -55,7 +55,7 @@ async function pgDatabaseUrl(name) {
 }
 (async () => {
   let failed = false;
-  for (const name of ['functional-smoke','security-multitenant','ai-core','ai-chat','whatsapp','taller-hardening','whatsapp-empty-pending','release-foundation','migration-safety','release-http','multi-business-beta','stable-operations','staff-portal','rls-defense']) {
+  for (const name of ['functional-smoke','security-multitenant','ai-core','ai-chat','whatsapp','taller-hardening','whatsapp-empty-pending','release-foundation','migration-safety','release-http','multi-business-beta','stable-operations','staff-portal','public-booking','rls-defense']) {
     if(process.argv.length>2&&!process.argv.slice(2).includes(name))continue;
     const port = await freePort();
     let dbEnv;
@@ -65,7 +65,7 @@ async function pgDatabaseUrl(name) {
     } else {
       dbEnv = { DATABASE_PATH: path.join(root, name+'.db') };
     }
-    const env = { ...process.env, NODE_ENV:'test', ...dbEnv, JWT_SECRET:'isolated-regression-key', OWNER_EMAIL:'owner@audit.test', OWNER_SEED_PASSWORD:'Isolated-test-password!', AI_FAKE_PROVIDER:'1', WHATSAPP_FAKE_TRANSPORT:'1', WHATSAPP_APP_SECRET:'testsecret', WHATSAPP_VERIFY_TOKEN:'testverify', WHATSAPP_PHONE_NUMBER_ID:'PNID_TEST_SUITE', WHATSAPP_ACCESS_TOKEN:'fake-only', PORT:String(port), HOST:'127.0.0.1', API_URL:`http://127.0.0.1:${port}/api` };
+    const env = { ...process.env, NODE_ENV:'test', ...dbEnv, JWT_SECRET:'isolated-regression-key', OWNER_EMAIL:'owner@audit.test', OWNER_SEED_PASSWORD:'Isolated-test-password!', AI_FAKE_PROVIDER:'1', WHATSAPP_FAKE_TRANSPORT:'1', WHATSAPP_APP_SECRET:'testsecret', WHATSAPP_VERIFY_TOKEN:'testverify', WHATSAPP_PHONE_NUMBER_ID:'PNID_TEST_SUITE', WHATSAPP_ACCESS_TOKEN:'fake-only', FRONTEND_URL:'http://localhost:5173', PORT:String(port), HOST:'127.0.0.1', API_URL:`http://127.0.0.1:${port}/api` };
     const api = launch(['src/index.js'], env);
     const apiFinished = finish(api);
     try {

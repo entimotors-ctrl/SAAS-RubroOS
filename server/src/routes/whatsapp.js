@@ -124,8 +124,22 @@ async function processEvent(evt) {
   const identity = await identityResolver.resolve({ phoneNumberId: evt.phoneNumberId, from: evt.from });
 
   if (!identity) {
-    await replyText(evt.from, identityResolver.UNKNOWN_NUMBER_MESSAGE);
-    await markEvent(evt.messageId, 'done');
+    // Quien escribe no es personal registrado — pero eso también pasa con
+    // personal real de permiso insuficiente (tenant_staff, suspendido, etc.),
+    // que debe seguir viendo el mensaje de siempre, no que lo traten como un
+    // cliente nuevo. Solo si el número que ESCRIBE no está vinculado a NADA,
+    // y el número que RECIBIÓ el mensaje sí es de un negocio real, se ofrece
+    // el link de la agenda pública (por ahora solo disponible para barbería,
+    // mientras no exista el flujo conversacional completo).
+    const yaConocido = await identityResolver.isKnownNumber({ phoneNumberId: evt.phoneNumberId, from: evt.from });
+    const business = yaConocido ? null : await identityResolver.resolveBusinessByPhoneNumberId(evt.phoneNumberId);
+    if (business && business.businessType === 'barberia' && process.env.FRONTEND_URL) {
+      const link = `${process.env.FRONTEND_URL.replace(/\/+$/, '')}/agendar/${business.slug}`;
+      await replyText(evt.from, `¡Hola! 👋 Para agendar tu cita entra aquí: ${link}`);
+    } else {
+      await replyText(evt.from, identityResolver.UNKNOWN_NUMBER_MESSAGE);
+    }
+    await markEvent(evt.messageId, 'done', business?.tenantId);
     return;
   }
 
