@@ -46,10 +46,25 @@ const TABLES_WITHOUT_ID = new Set([
   'staff_profiles',
 ]);
 
-// sslmode=require en la cadena de conexión activa TLS con verificación normal
-// del certificado (Supabase usa una CA pública válida) — nunca se deshabilita
-// rejectUnauthorized aquí.
-//
+// El pooler de Supabase (*.pooler.supabase.com) firma su certificado con su
+// propia CA privada ("Supabase Root 2021 CA") — no una pública (DigiCert,
+// Let's Encrypt, etc.), así que Node no la reconoce por defecto y rechaza la
+// conexión ("self-signed certificate in certificate chain") a menos que se
+// le indique explícitamente que confíe en ESA CA puntual — nunca se
+// deshabilita rejectUnauthorized/BYPASS como atajo. El certificado en sí
+// (server/certs/supabase-ca.crt) no es un secreto: es la CA pública de
+// Supabase para su pooler, igual para cualquier proyecto.
+// Otros hosts (un Postgres directo con sslmode=require, sin CA privada)
+// siguen verificando contra el set de CAs públicas de confianza de Node.
+const SUPABASE_CA_PATH = path.join(__dirname, '..', '..', 'certs', 'supabase-ca.crt');
+function sslOptionFor(connectionString) {
+  if (!connectionString) return undefined;
+  let hostname;
+  try { hostname = new URL(connectionString).hostname; } catch { return undefined; }
+  if (/\.supabase\.com$/.test(hostname)) return { ca: fs.readFileSync(SUPABASE_CA_PATH, 'utf8') };
+  return /sslmode=require/.test(connectionString) ? true : undefined;
+}
+
 // options: '-c TimeZone=UTC' fija la sesión de Postgres en UTC sin importar
 // la configuración del servidor: el código de la app (igual que el lado
 // JS — ver businessClock.js) siempre trata un timestamp sin zona como UTC: al
@@ -58,7 +73,7 @@ const TABLES_WITHOUT_ID = new Set([
 // TimeZone, Postgres interpretaría esos strings naive con esa zona en vez de
 // UTC y el resultado no coincidiría con el lado SQLite/JS.
 function poolFor(connectionString) {
-  return new Pool({ connectionString, ssl: /sslmode=require/.test(connectionString || '') ? true : undefined, options: '-c TimeZone=UTC' });
+  return new Pool({ connectionString, ssl: sslOptionFor(connectionString), options: '-c TimeZone=UTC' });
 }
 const pool = poolFor(process.env.DATABASE_URL);
 // DATABASE_ADMIN_URL (opcional): conexión con privilegios para el bootstrap
@@ -82,7 +97,12 @@ const ROLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
  */
 async function ensureAppRole(adminConn, databaseUrl) {
   const url = new URL(databaseUrl);
-  const appUser = decodeURIComponent(url.username || '');
+  // El pooler de Supabase (Supavisor) exige que el usuario de conexión sea
+  // "rol.referencia-de-proyecto" para enrutar a la base correcta — pero el
+  // ROL de Postgres en sí (el que hay que crear y otorgarle permisos) es
+  // solo la parte antes del primer punto; Supavisor quita ese sufijo antes
+  // de autenticar contra Postgres. Fuera de Supabase no hay sufijo que quitar.
+  const appUser = decodeURIComponent(url.username || '').split('.')[0];
   const appPassword = decodeURIComponent(url.password || '');
   if (!ROLE_NAME_PATTERN.test(appUser)) throw new Error(`DATABASE_URL tiene un nombre de usuario/rol inválido: "${appUser}"`);
   // CREATE ROLE/ALTER ROLE no aceptan parámetros ($1) en la cláusula PASSWORD
